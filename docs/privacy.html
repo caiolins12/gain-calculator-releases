@@ -14,7 +14,7 @@
             <p class="eyebrow">Gain Calculator</p>
             <h1>Política de Privacidade</h1>
             <p class="subtitle">Como tratamos seus dados no Gain Calculator</p>
-            <p class="meta">Versão 2 &middot; Vigente desde 12 de maio de 2026</p>
+            <p class="meta">Versão 3 &middot; Vigente desde 12 de maio de 2026</p>
         </header>
 
         <section class="legal-section">
@@ -24,7 +24,7 @@
 
         <section class="legal-section">
             <h2>2. Dados que coletamos</h2>
-            <p>• Dados de cadastro: nome, e-mail e senha. A senha é armazenada de forma cifrada pelo nosso provedor de autenticação (Supabase) e nunca trafega nem é guardada em texto claro.
+            <p>• Dados de cadastro: nome, e-mail, número de telefone celular e senha. A senha é armazenada de forma cifrada pelo nosso provedor de autenticação (Supabase) e nunca trafega nem é guardada em texto claro. O número de telefone é coletado obrigatoriamente no momento do cadastro e é confirmado por meio de um código (OTP) enviado por SMS/WhatsApp. Esse código é gerenciado pelo provedor de autenticação (Supabase) e por uma operadora de mensageria parceira (por exemplo, Twilio). O telefone é utilizado exclusivamente para (i) confirmar a identidade do titular no cadastro, (ii) prevenir fraudes e abuso de testes gratuitos, e (iii) viabilizar atendimento de suporte quando você nos solicitar. Não utilizamos seu telefone para envio de comunicação comercial, propaganda ou marketing.
 • Identificadores do dispositivo: hash criptográfico (HMAC-SHA256) do identificador Android, modelo, fabricante e sistema operacional do aparelho. O identificador original do Android nunca é enviado ao servidor — apenas o hash, que serve para vincular a licença ao dispositivo e prevenir uso indevido.
 • Dados financeiros e operacionais: valores de corridas, distâncias, durações, datas, endereços de origem e destino, app de origem da corrida (Uber, 99, etc.), avaliação registrada, receitas, despesas, metas e configurações que você cria no app. Esses dados ficam armazenados no seu dispositivo (banco de dados local) e, quando você está autenticado, também são sincronizados na sua conta para que possa restaurá-los em uma reinstalação ou outro aparelho.
 • Preferências de configuração: limites de aceite, perfil de consumo do veículo, lista de aplicativos que você escolheu monitorar e demais ajustes feitos na tela de Ajustes.
@@ -56,7 +56,8 @@
             <h2>6. Operadores e compartilhamento de dados</h2>
             <p>Para viabilizar o serviço, compartilhamos dados estritamente necessários com os seguintes operadores, cada um com sua própria política de privacidade:
 
-• Supabase (Supabase Inc.): provedor de autenticação, banco de dados e funções serverless. Recebe seus dados de cadastro, hash do dispositivo, dados financeiros e configurações sincronizados.
+• Supabase (Supabase Inc.): provedor de autenticação, banco de dados e funções serverless. Recebe seus dados de cadastro (incluindo número de telefone), hash do dispositivo, dados financeiros e configurações sincronizados.
+• Operadora de mensageria SMS/WhatsApp (por exemplo, Twilio Inc.): recebe o seu número de telefone exclusivamente para entregar o código de verificação (OTP) no momento do cadastro ou ao alterar o telefone na sua conta. Não compartilhamos com a operadora qualquer outro dado pessoal além do número e do código.
 • Mercado Pago (Mercado Pago S.A.): processamento de pagamentos. Recebe o valor, o método de pagamento e, opcionalmente, o e-mail informado por você no checkout.
 • Google LLC (Google ML Kit): biblioteca de reconhecimento de texto. O processamento ocorre localmente no dispositivo; não há envio das imagens da sua tela para a Google.
 
