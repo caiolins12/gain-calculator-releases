@@ -71,6 +71,15 @@
     background: transparent; border: 1px solid var(--borda); color: var(--apagado);
   }
 
+  .separador {
+    display: flex; align-items: center; gap: 10px;
+    margin: 18px 0 0; color: var(--apagado); font-size: 12px;
+  }
+  .separador::before, .separador::after {
+    content: ""; flex: 1; height: 1px; background: var(--borda);
+  }
+  button.google { background: #fff; color: #1F2328; }
+
   .recado { margin-top: 14px; font-size: 13px; color: var(--vermelho); }
   .recado.neutro { color: var(--apagado); }
 
@@ -109,6 +118,10 @@
     <label for="senha">Senha</label>
     <input id="senha" type="password" autocomplete="current-password">
     <button id="btn-entrar">Entrar</button>
+
+    <div class="separador"><span>ou</span></div>
+    <button id="btn-google" class="google">Entrar com o Google</button>
+
     <div id="recado-entrar" class="recado"></div>
   </section>
 
@@ -198,6 +211,52 @@ function estadoDaLicenca(expiryMs, vitalicia, agora) {
 }
 
 // ── Conversa com o servidor ─────────────────────────────────────────────────
+
+/**
+ * Entrada pelo Google.
+ *
+ * ── Por que isto precisou existir ────────────────────────────────────────────
+ * A primeira versão desta página só tinha e-mail e senha, e a conta
+ * administradora entra pelo Google — ou seja, o único caminho oferecido era
+ * justamente o que não funciona. Senha, aliás, não teria como ser consultada
+ * em lugar nenhum: o Supabase guarda o hash bcrypt, que é de mão única, e nem
+ * a chave de servidor devolve esse campo.
+ *
+ * O provedor devolve o token no FRAGMENTO da URL (depois do `#`), que nunca
+ * chega ao servidor — é por isso que dá para fazer isto numa página estática
+ * sem backend nenhum.
+ *
+ * Exige que este endereço esteja na lista de redirecionamentos permitidos do
+ * projeto (Authentication → URL Configuration), senão o Google devolve o
+ * usuário para o lugar errado.
+ */
+function entrarComGoogle() {
+  const volta = encodeURIComponent(location.origin + location.pathname);
+  location.href =
+    `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${volta}`;
+}
+
+/** Recolhe o token que o provedor deixou no fragmento e limpa a barra. */
+function tokenDoRetorno() {
+  if (!location.hash) return null;
+  const p = new URLSearchParams(location.hash.slice(1));
+  const token = p.get("access_token");
+  if (!token) return null;
+  // Tira o token da barra de endereço: ele não deve sobrar no histórico do
+  // navegador nem ser copiado junto quando alguém compartilha o link.
+  history.replaceState(null, "", location.pathname);
+  return token;
+}
+
+/** Quem é o dono deste token — para mostrar no cabeçalho. */
+async function emailDoToken(token) {
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${token}` }
+  });
+  if (!r.ok) return "";
+  return (await r.json()).email || "";
+}
+
 async function entrar(email, senha) {
   const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
@@ -325,6 +384,8 @@ $("btn-entrar").onclick = async () => {
   }
 };
 
+$("btn-google").onclick = entrarComGoogle;
+
 $("senha").addEventListener("keydown", e => { if (e.key === "Enter") $("btn-entrar").click(); });
 $("busca").addEventListener("input", desenharTabela);
 
@@ -341,8 +402,13 @@ $("btn-sair").onclick = () => {
   location.reload();
 };
 
-// Sessão da aba atual, se houver.
-(() => {
+// Retorno do Google primeiro; sessão da aba depois.
+(async () => {
+  const doGoogle = tokenDoRetorno();
+  if (doGoogle) {
+    mostrarPainel(doGoogle, await emailDoToken(doGoogle));
+    return;
+  }
   const s = JSON.parse(sessionStorage.getItem(CHAVE_SESSAO) || "{}");
   if (s.token) mostrarPainel(s.token, s.email);
 })();
