@@ -2,8 +2,8 @@
   Painel administrativo do Gain Calculator.
 
   ── Por que existe fora do app ──────────────────────────────────────────────
-  A tela de administração dentro do aplicativo tem 3.550 linhas e viaja no APK
-  de TODO motorista para servir uma pessoa. Aqui ela não pesa em ninguém.
+  A tela de administração dentro do aplicativo tinha 3.550 linhas e viajava no
+  APK de TODO motorista para servir uma pessoa. Aqui ela não pesa em ninguém.
 
   ── Como a segurança funciona ───────────────────────────────────────────────
   Esta página NÃO tem senha própria, e isso é deliberado. Uma senha escrita no
@@ -11,278 +11,335 @@
   no histórico do repositório para sempre — e não protegeria nada, porque quem
   lê o código chama a API direto, sem passar pelo formulário.
 
-  Quem autoriza é o servidor, como já acontece no aplicativo: o login abaixo
-  entra na conta real do Supabase, e as funções `admin_*` recusam qualquer
-  chamada que não venha de uma conta administradora. Trocar a senha da conta
-  fecha esta página junto.
+  Quem autoriza é o servidor, como já acontecia no aplicativo: as funções
+  `admin_*` recusam qualquer chamada que não venha de uma conta administradora.
 
-  A chave anônima abaixo é pública por natureza — ela é a mesma que o aplicativo
-  distribui em todo APK, e sozinha não dá acesso a nada. A chave `service_role`
-  NUNCA deve aparecer aqui.
+  A chave anônima abaixo é pública por natureza — é a mesma que o aplicativo
+  distribui em todo APK, e sozinha não dá acesso a nada. A `service_role` NUNCA
+  deve aparecer aqui.
+
+  ── Sobre o visual ──────────────────────────────────────────────────────────
+  Os tokens são os MESMOS do aplicativo, copiados de `ui/theme/Theme.kt`: cores
+  de marca, fundos em camadas, borda, o gradiente premium e a família
+  Montserrat. Não é imitação de memória — é a mesma paleta, para que abrir o
+  painel e abrir o app não pareça abrir dois produtos.
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gain Calculator — Administração</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
 
 <style>
+  /* ── Tokens, iguais aos de ui/theme/Theme.kt ───────────────────────────── */
   :root {
-    --fundo: #0B0F14;
-    --superficie: #141B24;
-    --borda: #2A3341;
-    --texto: #E6EDF3;
-    --apagado: #9AA7B8;
-    --verde: #22C55E;
-    --amarelo: #EAB308;
-    --vermelho: #EF4444;
-    --azul: #3B82F6;
+    --verde:#22C55E; --amarelo:#FACC15; --vermelho:#EF4444;
+    --azul:#3B82F6; --roxo:#8B5CF6;
+    --base:#0B0F14; --elev1:#141B24; --elev2:#1C2531;
+    --grad-verde:#13291F; --grad-azul:#10203A;
+    --texto:#E7ECF3; --apagado:#9AA7B8;
+    --borda:#2A3341; --borda-sutil:#233040; --campo:#0F151D;
+    --r-p:12px; --r-m:18px; --r-g:24px;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0;
-    background: var(--fundo);
-    color: var(--texto);
-    font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    margin:0; font-family:Montserrat, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    font-size:15px; line-height:1.5; color:var(--texto); background:var(--base);
   }
-  .envelope { max-width: 1180px; margin: 0 auto; padding: 24px 16px 80px; }
-  h1 { font-size: 22px; letter-spacing: -0.4px; margin: 0 0 4px; }
-  .sub { color: var(--apagado); font-size: 13px; margin-bottom: 24px; }
+  /* Gradiente premium do app: verde no topo, azul ao lado, esmaecendo para a base. */
+  body::before {
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      radial-gradient(1200px 520px at 12% -8%, var(--grad-verde) 0%, transparent 62%),
+      radial-gradient(1100px 560px at 88% 2%, var(--grad-azul) 0%, transparent 58%);
+  }
+  .envelope { position:relative; z-index:1; }
 
-  .cartao {
-    background: var(--superficie);
-    border: 1px solid var(--borda);
-    border-radius: 14px;
-    padding: 18px;
-  }
-  .entrar { max-width: 380px; margin: 12vh auto 0; }
-  label { display: block; font-size: 12px; color: var(--apagado); margin: 12px 0 4px; }
-  input {
-    width: 100%; padding: 11px 12px; border-radius: 9px;
-    border: 1px solid var(--borda); background: #0F151D; color: var(--texto);
-    font-size: 15px;
-  }
-  button {
-    margin-top: 16px; width: 100%; padding: 12px; border: 0; border-radius: 9px;
-    background: var(--azul); color: #fff; font-weight: 700; font-size: 15px;
-    cursor: pointer;
-  }
-  button:disabled { opacity: .5; cursor: default; }
-  button.discreto {
-    width: auto; margin: 0; padding: 7px 12px; font-size: 13px;
-    background: transparent; border: 1px solid var(--borda); color: var(--apagado);
-  }
+  .sobrancelha { font-size:11px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--apagado); }
+  h1 { font-size:24px; font-weight:800; letter-spacing:-.5px; margin:2px 0 0; }
+  .apoio { color:var(--apagado); font-size:13px; }
 
-  .separador {
-    display: flex; align-items: center; gap: 10px;
-    margin: 18px 0 0; color: var(--apagado); font-size: 12px;
+  .cartao { background:var(--elev1); border:1px solid var(--borda); border-radius:var(--r-g); padding:20px; }
+
+  label { display:block; margin:16px 0 6px; }
+  input[type=email], input[type=password], input[type=search], textarea {
+    width:100%; padding:13px 14px; border:1px solid var(--borda); border-radius:var(--r-p);
+    background:var(--campo); color:var(--texto); font:inherit; font-size:15px; transition:border-color .15s;
   }
-  .separador::before, .separador::after {
-    content: ""; flex: 1; height: 1px; background: var(--borda);
+  textarea { min-height:110px; resize:vertical; }
+  input:focus, textarea:focus { outline:0; border-color:#3A5268; }
+  input::placeholder, textarea::placeholder { color:#64748B; }
+
+  button { font:inherit; font-weight:700; cursor:pointer; border:0; border-radius:var(--r-p); transition:filter .15s, background .15s; }
+  button:hover:not(:disabled) { filter:brightness(1.08); }
+  button:disabled { opacity:.45; cursor:default; }
+  .principal { width:100%; padding:14px; background:var(--verde); color:#00210F; font-size:15px; }
+  .claro { width:100%; padding:14px; background:#fff; color:#1F2328; font-size:15px; display:flex; align-items:center; justify-content:center; gap:10px; }
+  .fantasma { padding:9px 14px; background:transparent; color:var(--apagado); border:1px solid var(--borda); font-size:13px; font-weight:600; }
+  .fantasma:hover { color:var(--texto); border-color:#3A5268; }
+  .fantasma[data-ativo="1"] { color:var(--texto); border-color:#3A5268; background:var(--elev2); }
+
+  .porta { max-width:400px; margin:0 auto; padding:14vh 20px 40px; }
+  .marca { width:46px; height:46px; border-radius:14px; margin-bottom:18px;
+    background:linear-gradient(135deg, var(--verde), var(--azul));
+    display:grid; place-items:center; font-weight:800; font-size:20px; color:#05140C; }
+  .separador { display:flex; align-items:center; gap:12px; margin:20px 0 0; }
+  .separador::before, .separador::after { content:""; flex:1; height:1px; background:var(--borda); }
+  .separador span { font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--apagado); }
+  details.alternativa { margin-top:18px; }
+  details.alternativa summary { cursor:pointer; font-size:13px; color:var(--apagado); list-style:none; }
+  details.alternativa summary::-webkit-details-marker { display:none; }
+  details.alternativa summary:hover { color:var(--texto); }
+
+  .topo { position:sticky; top:0; z-index:5; background:rgba(11,15,20,.86); backdrop-filter:blur(14px); border-bottom:1px solid var(--borda); }
+  .topo-dentro { max-width:1200px; margin:0 auto; padding:14px 20px; display:flex; align-items:center; gap:14px; }
+  .corpo { max-width:1200px; margin:0 auto; padding:24px 20px 90px; }
+
+  /* Abas segmentadas — o padrão do PremiumSegmentedTabs do app. */
+  .abas { display:inline-flex; gap:4px; padding:4px; margin-bottom:22px;
+    background:var(--elev1); border:1px solid var(--borda); border-radius:999px; flex-wrap:wrap; }
+  .abas button { padding:9px 18px; border-radius:999px; font-size:13px; font-weight:700; background:transparent; color:var(--apagado); }
+  .abas button[aria-selected="true"] { background:var(--elev2); color:var(--texto); }
+
+  .painel { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(158px,1fr)); margin-bottom:22px; }
+  .painel .cartao { padding:16px 18px; border-radius:var(--r-m); }
+  .numero { font-size:28px; font-weight:800; letter-spacing:-1px; line-height:1.1; }
+
+  .ferramentas { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+  .ferramentas input { flex:1; min-width:220px; }
+
+  .lista { padding:6px; }
+  .linha, .cabecalho { display:grid; gap:14px; align-items:center;
+    grid-template-columns:minmax(0,2.2fr) minmax(0,1.5fr) auto minmax(0,1fr) auto; }
+  .linha { padding:14px; border-radius:var(--r-m); cursor:pointer; }
+  .linha + .linha { border-top:1px solid var(--borda-sutil); border-radius:0; }
+  .linha:hover { background:var(--elev2); }
+  .cabecalho { padding:6px 14px 12px; }
+  .cabecalho div { font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--apagado); }
+  .cortado { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .forte { font-weight:600; }
+  .fraco { font-size:12px; color:var(--apagado); }
+  .direita { text-align:right; }
+
+  .selo { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap; }
+  .s-ativa{background:rgba(34,197,94,.14);color:var(--verde);} .s-vencendo{background:rgba(250,204,21,.14);color:var(--amarelo);}
+  .s-vencida{background:rgba(239,68,68,.14);color:var(--vermelho);} .s-vitalicia{background:rgba(59,130,246,.14);color:var(--azul);}
+  .s-interna{background:rgba(139,92,246,.14);color:var(--roxo);} .s-neutro{background:var(--elev2);color:var(--apagado);}
+  .online { color:var(--verde); font-weight:700; font-size:13px; }
+
+  .aviso { padding:34px 20px; text-align:center; color:var(--apagado); font-size:13px; }
+  .erro { color:var(--vermelho); }
+
+  dialog {
+    border:1px solid var(--borda); border-radius:var(--r-g); background:var(--elev1); color:var(--texto);
+    padding:0; max-width:560px; width:calc(100% - 32px);
   }
-  button.google { background: #fff; color: #1F2328; }
+  dialog::backdrop { background:rgba(0,0,0,.62); backdrop-filter:blur(3px); }
+  .folha { padding:22px; }
+  .par { display:flex; justify-content:space-between; gap:16px; padding:9px 0; border-bottom:1px solid var(--borda-sutil); font-size:14px; }
+  .par:last-child { border-bottom:0; }
+  .par span:first-child { color:var(--apagado); }
 
-  .recado { margin-top: 14px; font-size: 13px; color: var(--vermelho); }
-  .recado.neutro { color: var(--apagado); }
-
-  .resumo { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 18px; }
-  .numero { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
-  .rotulo { font-size: 12px; color: var(--apagado); text-transform: uppercase; letter-spacing: .06em; }
-
-  .barra { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
-  .barra input { flex: 1; min-width: 200px; }
-
-  .rolagem { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 780px; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--borda); white-space: nowrap; }
-  th { color: var(--apagado); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
-  tbody tr:hover { background: #182029; }
-
-  .selo {
-    display: inline-block; padding: 2px 8px; border-radius: 999px;
-    font-size: 11px; font-weight: 700;
+  @media (max-width:760px) {
+    .linha, .cabecalho { grid-template-columns:minmax(0,1fr) auto; }
+    .linha > :nth-child(2), .linha > :nth-child(4), .linha > :nth-child(5),
+    .cabecalho > :nth-child(2), .cabecalho > :nth-child(4), .cabecalho > :nth-child(5) { display:none; }
   }
-  .ativa   { background: rgba(34,197,94,.15);  color: var(--verde); }
-  .vencendo{ background: rgba(234,179,8,.15);  color: var(--amarelo); }
-  .vencida { background: rgba(239,68,68,.15);  color: var(--vermelho); }
-  .vitalicia{ background: rgba(59,130,246,.15); color: var(--azul); }
-  .ponto { color: var(--verde); }
 </style>
 
 <div class="envelope">
 
   <!-- ── Entrada ───────────────────────────────────────────────────────── -->
-  <section id="tela-entrar" class="cartao entrar">
-    <h1>Administração</h1>
-    <p class="sub">Entre com a conta administradora do Gain Calculator.</p>
-    <label for="email">E-mail</label>
-    <input id="email" type="email" autocomplete="username" placeholder="voce@exemplo.com">
-    <label for="senha">Senha</label>
-    <input id="senha" type="password" autocomplete="current-password">
-    <button id="btn-entrar">Entrar</button>
+  <section id="tela-entrar" class="porta">
+    <div class="cartao">
+      <div class="marca">G</div>
+      <div class="sobrancelha">Gain Calculator</div>
+      <h1>Administração</h1>
+      <p class="apoio" style="margin:8px 0 4px">Entre com a conta administradora. Quem valida é o servidor.</p>
 
-    <div class="separador"><span>ou</span></div>
-    <button id="btn-google" class="google">Entrar com o Google</button>
-
-    <div id="recado-entrar" class="recado"></div>
-  </section>
-
-  <!-- ── Painel ────────────────────────────────────────────────────────── -->
-  <section id="tela-painel" hidden>
-    <div class="barra">
-      <div style="flex:1">
-        <h1>Contas e dispositivos</h1>
-        <p class="sub" id="linha-conta" style="margin:0"></p>
+      <div class="separador"><span>entrar</span></div>
+      <div style="margin-top:16px">
+        <button id="btn-google" class="claro">
+          <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+            <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.6 30.2 0 24 0 14.6 0 6.4 5.4 2.5 13.2l7.8 6.1C12.2 13.3 17.6 9.5 24 9.5z"/>
+            <path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v9.1h12.4c-.5 2.9-2.2 5.3-4.7 6.9l7.3 5.7c4.3-3.9 6.8-9.7 6.8-17.1z"/>
+            <path fill="#FBBC05" d="M10.3 28.7c-.5-1.4-.8-2.9-.8-4.7s.3-3.3.8-4.7l-7.8-6.1C.9 16.6 0 20.2 0 24s.9 7.4 2.5 10.8l7.8-6.1z"/>
+            <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.3-5.7c-2 1.4-4.7 2.3-8.6 2.3-6.4 0-11.8-3.8-13.7-9.1l-7.8 6.1C6.4 42.6 14.6 48 24 48z"/>
+          </svg>
+          Entrar com o Google
+        </button>
       </div>
-      <button class="discreto" id="btn-recarregar">Recarregar</button>
-      <button class="discreto" id="btn-sair">Sair</button>
-    </div>
 
-    <div class="resumo" id="resumo"></div>
+      <details class="alternativa">
+        <summary>Entrar com e-mail e senha</summary>
+        <label for="email" class="sobrancelha">E-mail</label>
+        <input id="email" type="email" autocomplete="username" placeholder="voce@exemplo.com">
+        <label for="senha" class="sobrancelha">Senha</label>
+        <input id="senha" type="password" autocomplete="current-password">
+        <div style="margin-top:16px"><button id="btn-entrar" class="principal">Entrar</button></div>
+      </details>
 
-    <div class="barra">
-      <input id="busca" placeholder="Filtrar por e-mail, nome ou aparelho…">
-    </div>
-
-    <div class="cartao rolagem">
-      <table>
-        <thead>
-          <tr>
-            <th>Conta</th>
-            <th>Aparelho</th>
-            <th>Licença</th>
-            <th>Visto por último</th>
-            <th>Uso total</th>
-            <th>Sessões</th>
-          </tr>
-        </thead>
-        <tbody id="corpo"></tbody>
-      </table>
-      <div id="recado-painel" class="recado neutro"></div>
+      <div id="recado-entrar" class="apoio erro" style="margin-top:14px"></div>
     </div>
   </section>
+
+  <!-- ── Moldura logada ────────────────────────────────────────────────── -->
+  <div id="tela-painel" hidden>
+    <header class="topo">
+      <div class="topo-dentro">
+        <div class="marca" style="width:36px;height:36px;border-radius:11px;font-size:16px;margin:0">G</div>
+        <div style="flex:1;min-width:0">
+          <div class="sobrancelha">Administração</div>
+          <div class="forte cortado" id="linha-conta"></div>
+        </div>
+        <button class="fantasma" id="btn-recarregar">Recarregar</button>
+        <button class="fantasma" id="btn-sair">Sair</button>
+      </div>
+    </header>
+
+    <main class="corpo">
+      <div class="abas" role="tablist">
+        <button role="tab" data-aba="contas" aria-selected="true">Contas</button>
+        <button role="tab" data-aba="diagnosticos" aria-selected="false">Diagnósticos</button>
+        <button role="tab" data-aba="estatisticas" aria-selected="false">Estatísticas</button>
+        <button role="tab" data-aba="versoes" aria-selected="false">Versões</button>
+      </div>
+
+      <!-- Contas -->
+      <section id="aba-contas">
+        <div class="painel" id="painel"></div>
+        <div class="ferramentas">
+          <input id="busca" type="search" placeholder="Filtrar por e-mail, nome ou aparelho…">
+          <button class="fantasma" data-filtro="todos" data-ativo="1">Todos</button>
+          <button class="fantasma" data-filtro="online">Online</button>
+          <button class="fantasma" data-filtro="vencendo">Vencendo</button>
+          <button class="fantasma" data-filtro="vencida">Vencidas</button>
+        </div>
+        <div class="cartao lista">
+          <div class="cabecalho">
+            <div>Conta</div><div>Aparelho</div><div>Licença</div><div>Visto por último</div><div class="direita">Uso</div>
+          </div>
+          <div id="linhas"></div>
+          <div id="recado-painel" class="aviso"></div>
+        </div>
+      </section>
+
+      <!-- Diagnósticos -->
+      <section id="aba-diagnosticos" hidden>
+        <div class="ferramentas">
+          <input id="busca-diag" type="search" placeholder="Filtrar por conta, aparelho ou mensagem…">
+          <button class="fantasma" id="btn-carregar-diag">Carregar</button>
+        </div>
+        <div class="cartao lista">
+          <div class="cabecalho" style="grid-template-columns:minmax(0,2fr) minmax(0,3fr) auto auto">
+            <div>Origem</div><div>Relato</div><div>Estado</div><div class="direita">Quando</div>
+          </div>
+          <div id="linhas-diag"></div>
+          <div id="recado-diag" class="aviso">Toque em Carregar para buscar os relatórios.</div>
+        </div>
+      </section>
+
+      <!-- Estatísticas -->
+      <section id="aba-estatisticas" hidden>
+        <div class="ferramentas"><button class="fantasma" id="btn-carregar-stats">Carregar</button></div>
+        <div class="painel" id="painel-stats"></div>
+        <div class="cartao"><div id="corpo-stats" class="aviso">Toque em Carregar para buscar as estatísticas da base.</div></div>
+      </section>
+
+      <!-- Versões -->
+      <section id="aba-versoes" hidden>
+        <div class="ferramentas"><button class="fantasma" id="btn-carregar-versoes">Carregar</button></div>
+        <div class="cartao lista">
+          <div class="cabecalho" style="grid-template-columns:minmax(0,1fr) auto auto">
+            <div>Versão</div><div>Aparelhos</div><div class="direita">Participação</div>
+          </div>
+          <div id="linhas-versoes"></div>
+          <div id="recado-versoes" class="aviso">Toque em Carregar para ver a distribuição de versões.</div>
+        </div>
+      </section>
+    </main>
+  </div>
 </div>
+
+<dialog id="folha-conta"><div class="folha" id="folha-conta-corpo"></div></dialog>
 
 <script>
 // ── Configuração ────────────────────────────────────────────────────────────
-// A chave anônima é pública por natureza: é a mesma embutida em todo APK, e
-// sozinha não abre nada. Quem decide o que pode ser lido são as políticas do
-// banco e as funções `admin_*`.
 const SUPABASE_URL = "https://wckwpfaagvzppuzlnwbx.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indja3dwZmFhZ3Z6cHB1emxud2J4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4MDE5NjcsImV4cCI6MjA5MjM3Nzk2N30.M-fcU5zIsr6PwBRqJZv3v0MQdHBCCpC_zm7g0tB8U_k";
 
 const CHAVE_SESSAO = "gain_admin_sessao";
-
-// ── Utilidades ──────────────────────────────────────────────────────────────
+const JANELA_ONLINE_MS = 5 * 60 * 1000;
 const $ = (id) => document.getElementById(id);
 
-/** Milissegundos em "há 3 h" — o painel do app usa a mesma leitura. */
+// ── Formatação ──────────────────────────────────────────────────────────────
 function desde(ms, agora) {
   if (!ms) return "—";
   const s = Math.max(0, Math.floor((agora - ms) / 1000));
   if (s < 60) return "agora";
-  const m = Math.floor(s / 60);
-  if (m < 60) return `há ${m} min`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `há ${h} h`;
-  return `há ${Math.floor(h / 24)} d`;
+  const m = Math.floor(s / 60); if (m < 60) return `há ${m} min`;
+  const h = Math.floor(m / 60); if (h < 24) return `há ${h} h`;
+  const d = Math.floor(h / 24); return d < 30 ? `há ${d} d` : `há ${Math.floor(d / 30)} m`;
 }
-
-/** Duração de uso acumulado, em horas e minutos. */
 function duracao(ms) {
   if (!ms) return "—";
-  const min = Math.floor(ms / 60000);
-  const h = Math.floor(min / 60);
+  const min = Math.floor(ms / 60000), h = Math.floor(min / 60);
   return h > 0 ? `${h}h ${min % 60}min` : `${min}min`;
 }
-
-/**
- * Estado da licença.
- *
- * A mesma regra do aplicativo (`licenseStatusOf`): vitalícia vence tudo, e
- * "vencendo" é a faixa de sete dias que justifica um contato antes de perder o
- * usuário.
- */
-function estadoDaLicenca(expiryMs, vitalicia, agora) {
-  if (vitalicia) return ["vitalicia", "Vitalícia"];
-  if (!expiryMs) return ["vencida", "Sem licença"];
-  const dias = Math.floor((expiryMs - agora) / 86400000);
-  if (dias < 0) return ["vencida", "Vencida"];
-  if (dias <= 7) return ["vencendo", `${dias} d`];
-  return ["ativa", `${dias} d`];
+function dataHora(ms) {
+  return ms ? new Date(ms).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
 }
+/** A mesma regra do app (`licenseStatusOf`): vitalícia vence tudo; 7 dias é a faixa de contato. */
+function estadoDaLicenca(expiryMs, vitalicia, agora) {
+  if (vitalicia) return ["s-vitalicia", "Vitalícia"];
+  if (!expiryMs) return ["s-vencida", "Sem licença"];
+  const dias = Math.floor((expiryMs - agora) / 86400000);
+  if (dias < 0) return ["s-vencida", "Vencida"];
+  if (dias <= 7) return ["s-vencendo", `${dias} d`];
+  return ["s-ativa", `${dias} d`];
+}
+const escapar = (t) => String(t ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 
-// ── Conversa com o servidor ─────────────────────────────────────────────────
-
+// ── Servidor ────────────────────────────────────────────────────────────────
 /**
  * Entrada pelo Google.
  *
- * ── Por que isto precisou existir ────────────────────────────────────────────
- * A primeira versão desta página só tinha e-mail e senha, e a conta
- * administradora entra pelo Google — ou seja, o único caminho oferecido era
- * justamente o que não funciona. Senha, aliás, não teria como ser consultada
- * em lugar nenhum: o Supabase guarda o hash bcrypt, que é de mão única, e nem
- * a chave de servidor devolve esse campo.
- *
  * O provedor devolve o token no FRAGMENTO da URL (depois do `#`), que nunca
- * chega ao servidor — é por isso que dá para fazer isto numa página estática
- * sem backend nenhum.
- *
- * Exige que este endereço esteja na lista de redirecionamentos permitidos do
- * projeto (Authentication → URL Configuration), senão o Google devolve o
- * usuário para o lugar errado.
+ * chega a servidor nenhum — é o que permite login numa página estática sem
+ * backend. Exige este endereço na lista de redirecionamentos do projeto.
  */
 function entrarComGoogle() {
   const volta = encodeURIComponent(location.origin + location.pathname);
-  location.href =
-    `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${volta}`;
+  location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${volta}`;
 }
-
-/** Recolhe o token que o provedor deixou no fragmento e limpa a barra. */
 function tokenDoRetorno() {
   if (!location.hash) return null;
-  const p = new URLSearchParams(location.hash.slice(1));
-  const token = p.get("access_token");
+  const token = new URLSearchParams(location.hash.slice(1)).get("access_token");
   if (!token) return null;
-  // Tira o token da barra de endereço: ele não deve sobrar no histórico do
-  // navegador nem ser copiado junto quando alguém compartilha o link.
-  history.replaceState(null, "", location.pathname);
+  history.replaceState(null, "", location.pathname);  // não deixa o token no histórico
   return token;
 }
-
-/** Quem é o dono deste token — para mostrar no cabeçalho. */
-async function emailDoToken(token) {
-  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${token}` }
-  });
-  if (!r.ok) return "";
-  return (await r.json()).email || "";
-}
-
-async function entrar(email, senha) {
+async function entrarComSenha(email, senha) {
   const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-    method: "POST",
-    headers: { "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+    method:"POST", headers:{ "apikey":SUPABASE_ANON_KEY, "Content-Type":"application/json" },
     body: JSON.stringify({ email, password: senha })
   });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error_description || j.msg || "E-mail ou senha incorretos.");
   return j.access_token;
 }
-
-/**
- * Chama uma função `admin_*` do banco.
- *
- * O token vai no cabeçalho e é ele que identifica quem está pedindo. Se a conta
- * não for administradora, a própria função recusa — esta página não tem, e não
- * deve ter, nenhuma verificação própria de permissão.
- */
-async function chamar(nome, token, corpo = {}) {
+async function emailDoToken(token) {
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers:{ "apikey":SUPABASE_ANON_KEY, "Authorization":`Bearer ${token}` } });
+  return r.ok ? ((await r.json()).email || "") : "";
+}
+/** Chama uma função `admin_*`. Quem recusa quem não é admin é o banco. */
+async function chamar(nome, corpo = {}) {
+  const s = JSON.parse(sessionStorage.getItem(CHAVE_SESSAO) || "{}");
   const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${nome}`, {
-    method: "POST",
-    headers: {
-      "apikey": SUPABASE_ANON_KEY,
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
+    method:"POST",
+    headers:{ "apikey":SUPABASE_ANON_KEY, "Authorization":`Bearer ${s.token}`, "Content-Type":"application/json" },
     body: JSON.stringify(corpo)
   });
   const j = await r.json().catch(() => ({}));
@@ -290,125 +347,258 @@ async function chamar(nome, token, corpo = {}) {
   return j;
 }
 
-// ── Tela ────────────────────────────────────────────────────────────────────
-let dispositivos = [];
-let relogioDoServidor = Date.now();
+// ── Estado ──────────────────────────────────────────────────────────────────
+let dispositivos = [], diagnosticos = [], relogio = Date.now(), filtro = "todos";
 
-function desenharResumo() {
-  const agora = relogioDoServidor;
+function ehOnline(d) { return d.last_seen_ms && relogio - d.last_seen_ms < JANELA_ONLINE_MS; }
+function diasRestantes(d) {
+  if (d.is_lifetime || !d.expiry_ms) return null;
+  return Math.floor((d.expiry_ms - relogio) / 86400000);
+}
+
+// ── Contas ──────────────────────────────────────────────────────────────────
+function desenharPainel() {
   const contas = new Set(dispositivos.filter(d => d.user_id).map(d => d.user_id));
-  const online = dispositivos.filter(d => d.last_seen_ms && agora - d.last_seen_ms < 5 * 60000).length;
-  const ativas = dispositivos.filter(d =>
-    d.is_lifetime || (d.expiry_ms && d.expiry_ms > agora)).length;
+  const online = dispositivos.filter(ehOnline).length;
+  const ativas = dispositivos.filter(d => d.is_lifetime || (d.expiry_ms && d.expiry_ms > relogio)).length;
+  const vencendo = dispositivos.filter(d => { const x = diasRestantes(d); return x !== null && x >= 0 && x <= 7; }).length;
 
-  $("resumo").innerHTML = [
-    ["Contas", contas.size],
-    ["Aparelhos", dispositivos.length],
-    ["Licenças ativas", ativas],
-    ["Online agora", online]
-  ].map(([rotulo, valor]) => `
-    <div class="cartao">
-      <div class="numero">${valor}</div>
-      <div class="rotulo">${rotulo}</div>
+  $("painel").innerHTML = [
+    ["Contas", contas.size, ""],
+    ["Aparelhos", dispositivos.length, ""],
+    ["Licenças ativas", ativas, "color:var(--verde)"],
+    ["Vencendo em 7 dias", vencendo, vencendo ? "color:var(--amarelo)" : ""],
+    ["Online agora", online, online ? "color:var(--verde)" : ""]
+  ].map(([rot, val, est]) => `<div class="cartao">
+      <div class="numero" style="${est}">${val}</div>
+      <div class="sobrancelha" style="margin-top:4px">${rot}</div>
     </div>`).join("");
 }
 
-function desenharTabela() {
-  const agora = relogioDoServidor;
+function desenharLinhas() {
   const busca = $("busca").value.trim().toLowerCase();
   const lista = dispositivos.filter(d => {
-    if (!busca) return true;
-    return [d.user_email, d.user_name, d.device_name, d.user_phone]
-      .some(v => (v || "").toLowerCase().includes(busca));
+    if (busca && ![d.user_email, d.user_name, d.device_name, d.user_phone]
+      .some(v => (v || "").toLowerCase().includes(busca))) return false;
+    const dias = diasRestantes(d);
+    if (filtro === "online") return ehOnline(d);
+    if (filtro === "vencendo") return dias !== null && dias >= 0 && dias <= 7;
+    if (filtro === "vencida") return !d.is_lifetime && (!d.expiry_ms || d.expiry_ms < relogio);
+    return true;
   });
 
-  $("corpo").innerHTML = lista.map(d => {
-    const [classe, texto] = estadoDaLicenca(d.expiry_ms, d.is_lifetime, agora);
-    const online = d.last_seen_ms && agora - d.last_seen_ms < 5 * 60000;
-    const conta = d.user_email || "<span style='color:var(--apagado)'>sem conta</span>";
-    const nome = d.user_name ? `<div style="color:var(--apagado);font-size:12px">${d.user_name}</div>` : "";
-    return `<tr>
-      <td>${conta}${nome}</td>
-      <td>${d.device_name || "—"}</td>
-      <td><span class="selo ${classe}">${texto}</span></td>
-      <td>${online ? '<span class="ponto">● online</span>' : desde(d.last_seen_ms, agora)}</td>
-      <td>${duracao(d.total_usage_ms)}</td>
-      <td>${d.session_count || 0}</td>
-    </tr>`;
+  $("linhas").innerHTML = lista.map((d, i) => {
+    const [classe, texto] = estadoDaLicenca(d.expiry_ms, d.is_lifetime, relogio);
+    const conta = d.user_email ? escapar(d.user_email) : '<span class="apoio">sem conta vinculada</span>';
+    const interna = d.is_internal ? ' <span class="selo s-interna">interna</span>' : "";
+    const testador = d.is_tester ? ' <span class="selo s-neutro">testador</span>' : "";
+    return `<div class="linha" data-i="${dispositivos.indexOf(d)}">
+      <div class="cortado">
+        <div class="forte cortado">${conta}${interna}${testador}</div>
+        ${d.user_name ? `<div class="fraco cortado">${escapar(d.user_name)}</div>` : ""}
+      </div>
+      <div class="cortado fraco">${escapar(d.device_name || "—")}</div>
+      <div><span class="selo ${classe}">${texto}</span></div>
+      <div class="fraco">${ehOnline(d) ? '<span class="online">● online</span>' : desde(d.last_seen_ms, relogio)}</div>
+      <div class="direita">
+        <div class="forte">${duracao(d.total_usage_ms)}</div>
+        <div class="fraco">${d.session_count || 0} sessões</div>
+      </div>
+    </div>`;
   }).join("");
 
+  $("recado-painel").className = "aviso";
   $("recado-painel").textContent = lista.length
     ? `${lista.length} de ${dispositivos.length} aparelhos`
     : "Nenhum aparelho corresponde ao filtro.";
+
+  document.querySelectorAll("#linhas .linha").forEach(el => {
+    el.onclick = () => abrirFolha(dispositivos[Number(el.dataset.i)]);
+  });
 }
 
-async function carregar(token) {
+/** Ficha da conta — o equivalente ao detalhe que o painel do app abria. */
+function abrirFolha(d) {
+  const [classe, texto] = estadoDaLicenca(d.expiry_ms, d.is_lifetime, relogio);
+  const par = (r, v) => `<div class="par"><span>${r}</span><span class="forte">${v}</span></div>`;
+  $("folha-conta-corpo").innerHTML = `
+    <div class="sobrancelha">Conta e aparelho</div>
+    <h1 style="font-size:19px">${escapar(d.user_email || "Sem conta vinculada")}</h1>
+    <div style="margin:16px 0 4px"><span class="selo ${classe}">${texto}</span>
+      ${d.is_internal ? '<span class="selo s-interna">interna</span>' : ""}
+      ${d.is_tester ? '<span class="selo s-neutro">testador</span>' : ""}</div>
+    <div style="margin-top:12px">
+      ${par("Nome", escapar(d.user_name || "—"))}
+      ${par("Telefone", escapar(d.user_phone || "—") + (d.user_phone_confirmed ? " ✓" : ""))}
+      ${par("Aparelho", escapar(d.device_name || "—"))}
+      ${par("Identificador", `<code style="font-size:11px">${escapar((d.device_hash || "").slice(0, 16))}…</code>`)}
+      ${par("Vinculado em", dataHora(d.user_linked_at_ms))}
+      ${par("Primeiro acesso", dataHora(d.created_at_ms))}
+      ${par("Visto por último", dataHora(d.last_seen_ms))}
+      ${par("Vence em", d.is_lifetime ? "nunca" : dataHora(d.expiry_ms))}
+      ${par("Uso acumulado", duracao(d.total_usage_ms))}
+      ${par("Sessões", d.session_count || 0)}
+      ${d.is_tester ? par("Check-ins", `${d.tester_checkin_count || 0} / 14${d.tester_completed ? " ✓" : ""}`) : ""}
+    </div>
+    <div style="margin-top:20px"><button class="fantasma" onclick="folhaConta.close()">Fechar</button></div>`;
+  $("folha-conta").showModal();
+}
+
+async function carregarContas() {
+  $("recado-painel").className = "aviso";
   $("recado-painel").textContent = "Carregando…";
-  const resposta = await chamar("admin_list_devices", token);
-  if (resposta.status !== "ok") {
-    throw new Error("Esta conta não tem permissão de administração.");
-  }
-  // Alinha o relógio do painel ao do banco, como o app faz: os "há X h" e o
-  // "online agora" são calculados sobre esta base, e o relógio do navegador
-  // pode estar minutos fora.
-  relogioDoServidor = resposta.server_time_ms || Date.now();
-  dispositivos = resposta.devices || [];
-  desenharResumo();
-  desenharTabela();
+  const r = await chamar("admin_list_devices");
+  if (r.status !== "ok") throw new Error("Esta conta não tem permissão de administração.");
+  // Alinha o relógio ao do banco, como o app faz: "online agora" e "há X h"
+  // saem desta base, e o relógio do navegador pode estar minutos fora.
+  relogio = r.server_time_ms || Date.now();
+  dispositivos = r.devices || [];
+  desenharPainel(); desenharLinhas();
 }
 
+// ── Diagnósticos ────────────────────────────────────────────────────────────
+async function carregarDiagnosticos() {
+  $("recado-diag").className = "aviso";
+  $("recado-diag").textContent = "Carregando…";
+  try {
+    const r = await chamar("admin_list_diagnostic_reports", { p_limit: 200 });
+    diagnosticos = r.reports || r.items || (Array.isArray(r) ? r : []);
+    desenharDiagnosticos();
+  } catch (e) {
+    $("recado-diag").className = "aviso erro";
+    $("recado-diag").textContent = e.message;
+  }
+}
+function desenharDiagnosticos() {
+  const busca = $("busca-diag").value.trim().toLowerCase();
+  const lista = diagnosticos.filter(d => !busca ||
+    JSON.stringify(d).toLowerCase().includes(busca));
+  $("linhas-diag").innerHTML = lista.map(d => {
+    const estado = (d.status || "novo").toLowerCase();
+    const cor = estado === "resolvido" ? "s-ativa" : estado === "em_analise" ? "s-vencendo" : "s-neutro";
+    return `<div class="linha" style="grid-template-columns:minmax(0,2fr) minmax(0,3fr) auto auto;cursor:default">
+      <div class="cortado">
+        <div class="forte cortado">${escapar(d.user_email || d.device_name || "—")}</div>
+        <div class="fraco cortado">${escapar(d.app_version || "")}</div>
+      </div>
+      <div class="cortado fraco">${escapar(d.message || d.error_code || d.summary || "—")}</div>
+      <div><span class="selo ${cor}">${escapar(estado)}</span></div>
+      <div class="direita fraco">${desde(d.created_at_ms || Date.parse(d.created_at || 0), relogio)}</div>
+    </div>`;
+  }).join("");
+  $("recado-diag").className = "aviso";
+  $("recado-diag").textContent = lista.length ? `${lista.length} relatórios` : "Nenhum relatório.";
+}
+
+// ── Estatísticas ────────────────────────────────────────────────────────────
+async function carregarEstatisticas() {
+  $("corpo-stats").className = "aviso";
+  $("corpo-stats").textContent = "Carregando…";
+  try {
+    const r = await chamar("admin_usage_statistics", {});
+    const numeros = Object.entries(r).filter(([, v]) => typeof v === "number");
+    $("painel-stats").innerHTML = numeros.map(([k, v]) => `
+      <div class="cartao">
+        <div class="numero">${v.toLocaleString("pt-BR")}</div>
+        <div class="sobrancelha" style="margin-top:4px">${escapar(k.replace(/_/g, " "))}</div>
+      </div>`).join("");
+    $("corpo-stats").className = "";
+    $("corpo-stats").innerHTML =
+      `<div class="sobrancelha" style="margin-bottom:10px">Resposta completa</div>
+       <pre style="margin:0;overflow:auto;font-size:12px;color:var(--apagado)">${escapar(JSON.stringify(r, null, 2))}</pre>`;
+  } catch (e) {
+    $("corpo-stats").className = "aviso erro";
+    $("corpo-stats").textContent = e.message;
+  }
+}
+
+// ── Versões ─────────────────────────────────────────────────────────────────
+async function carregarVersoes() {
+  $("recado-versoes").className = "aviso";
+  $("recado-versoes").textContent = "Carregando…";
+  try {
+    const r = await chamar("admin_user_versions", {});
+    const linhas = r.versions || r.items || (Array.isArray(r) ? r : []);
+    const total = linhas.reduce((s, v) => s + (v.device_count || v.count || 0), 0) || 1;
+    $("linhas-versoes").innerHTML = linhas.map(v => {
+      const n = v.device_count || v.count || 0;
+      const pct = Math.round(n * 100 / total);
+      return `<div class="linha" style="grid-template-columns:minmax(0,1fr) auto auto;cursor:default">
+        <div class="forte">${escapar(v.app_version || v.version || "—")}</div>
+        <div class="fraco">${n}</div>
+        <div class="direita forte">${pct}%</div>
+      </div>`;
+    }).join("");
+    $("recado-versoes").className = "aviso";
+    $("recado-versoes").textContent = linhas.length ? `${linhas.length} versões em uso` : "Sem dados.";
+  } catch (e) {
+    $("recado-versoes").className = "aviso erro";
+    $("recado-versoes").textContent = e.message;
+  }
+}
+
+// ── Moldura ─────────────────────────────────────────────────────────────────
 function mostrarPainel(token, email) {
   sessionStorage.setItem(CHAVE_SESSAO, JSON.stringify({ token, email }));
   $("tela-entrar").hidden = true;
   $("tela-painel").hidden = false;
   $("linha-conta").textContent = email;
-  carregar(token).catch(e => { $("recado-painel").textContent = e.message; });
+  carregarContas().catch(e => {
+    $("recado-painel").className = "aviso erro";
+    $("recado-painel").textContent = e.message;
+  });
 }
 
-// ── Ligações ────────────────────────────────────────────────────────────────
+$("btn-google").onclick = entrarComGoogle;
 $("btn-entrar").onclick = async () => {
-  const botao = $("btn-entrar");
-  const recado = $("recado-entrar");
-  recado.textContent = "";
-  botao.disabled = true;
-  botao.textContent = "Entrando…";
+  const b = $("btn-entrar"), rec = $("recado-entrar");
+  rec.textContent = ""; b.disabled = true; b.textContent = "Entrando…";
   try {
     const email = $("email").value.trim();
-    const token = await entrar(email, $("senha").value);
-    mostrarPainel(token, email);
-  } catch (e) {
-    recado.textContent = e.message;
-  } finally {
-    botao.disabled = false;
-    botao.textContent = "Entrar";
-  }
+    mostrarPainel(await entrarComSenha(email, $("senha").value), email);
+  } catch (e) { rec.textContent = e.message; }
+  finally { b.disabled = false; b.textContent = "Entrar"; }
 };
-
-$("btn-google").onclick = entrarComGoogle;
-
 $("senha").addEventListener("keydown", e => { if (e.key === "Enter") $("btn-entrar").click(); });
-$("busca").addEventListener("input", desenharTabela);
+$("busca").addEventListener("input", desenharLinhas);
+$("busca-diag").addEventListener("input", desenharDiagnosticos);
+$("btn-carregar-diag").onclick = carregarDiagnosticos;
+$("btn-carregar-stats").onclick = carregarEstatisticas;
+$("btn-carregar-versoes").onclick = carregarVersoes;
 
-$("btn-recarregar").onclick = () => {
-  const s = JSON.parse(sessionStorage.getItem(CHAVE_SESSAO) || "{}");
-  if (s.token) carregar(s.token).catch(e => { $("recado-painel").textContent = e.message; });
-};
+document.querySelectorAll("[data-filtro]").forEach(b => {
+  b.onclick = () => {
+    filtro = b.dataset.filtro;
+    document.querySelectorAll("[data-filtro]").forEach(o => o.dataset.ativo = o === b ? "1" : "0");
+    desenharLinhas();
+  };
+});
 
+$("btn-recarregar").onclick = () => carregarContas().catch(e => {
+  $("recado-painel").className = "aviso erro"; $("recado-painel").textContent = e.message;
+});
 $("btn-sair").onclick = () => {
   // `sessionStorage` e não `localStorage`: fechar a aba encerra a sessão. Num
-  // painel que lista a base inteira, uma sessão que sobrevive ao navegador é
-  // um risco desnecessário.
+  // painel que lista a base inteira, sessão que sobrevive ao navegador é risco
+  // desnecessário.
   sessionStorage.removeItem(CHAVE_SESSAO);
   location.reload();
 };
 
+document.querySelectorAll(".abas button").forEach(botao => {
+  botao.onclick = () => {
+    document.querySelectorAll(".abas button").forEach(b => b.setAttribute("aria-selected", String(b === botao)));
+    ["contas","diagnosticos","estatisticas","versoes"].forEach(n => $(`aba-${n}`).hidden = n !== botao.dataset.aba);
+  };
+});
+
+const folhaConta = $("folha-conta");
+folhaConta.addEventListener("click", e => { if (e.target === folhaConta) folhaConta.close(); });
+
 // Retorno do Google primeiro; sessão da aba depois.
 (async () => {
   const doGoogle = tokenDoRetorno();
-  if (doGoogle) {
-    mostrarPainel(doGoogle, await emailDoToken(doGoogle));
-    return;
-  }
+  if (doGoogle) return mostrarPainel(doGoogle, await emailDoToken(doGoogle));
   const s = JSON.parse(sessionStorage.getItem(CHAVE_SESSAO) || "{}");
   if (s.token) mostrarPainel(s.token, s.email);
 })();
