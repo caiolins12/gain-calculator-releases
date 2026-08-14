@@ -128,6 +128,18 @@
   .s-interna{background:rgba(139,92,246,.14);color:var(--roxo);} .s-neutro{background:var(--elev2);color:var(--apagado);}
   .online { color:var(--verde); font-weight:700; font-size:13px; }
 
+  /* Barra proporcional — o mesmo recurso que o painel do app usava para
+     comparar telas e fontes sem exigir leitura de número. */
+  .barra-fundo { height:6px; border-radius:999px; background:var(--elev2); overflow:hidden; }
+  .barra-frente { height:100%; border-radius:999px; background:var(--verde); }
+  .bloco { margin-bottom:22px; }
+  .bloco > h2 { font-size:13px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--apagado); margin:0 0 12px; }
+  .funil { display:grid; gap:10px; }
+  .etapa { display:grid; grid-template-columns:minmax(0,150px) 1fr auto; gap:14px; align-items:center; }
+  .etapa .rot { font-size:13px; font-weight:600; }
+  .etapa .val { font-size:13px; font-weight:700; min-width:96px; text-align:right; }
+
   .aviso { padding:34px 20px; text-align:center; color:var(--apagado); font-size:13px; }
   .erro { color:var(--vermelho); }
 
@@ -229,7 +241,6 @@
       <section id="aba-diagnosticos" hidden>
         <div class="ferramentas">
           <input id="busca-diag" type="search" placeholder="Filtrar por conta, aparelho ou mensagem…">
-          <button class="fantasma" id="btn-carregar-diag">Carregar</button>
         </div>
         <div class="cartao lista">
           <div class="cabecalho" style="grid-template-columns:minmax(0,2fr) minmax(0,3fr) auto auto">
@@ -242,20 +253,19 @@
 
       <!-- Estatísticas -->
       <section id="aba-estatisticas" hidden>
-        <div class="ferramentas"><button class="fantasma" id="btn-carregar-stats">Carregar</button></div>
         <div class="painel" id="painel-stats"></div>
-        <div class="cartao"><div id="corpo-stats" class="aviso">Toque em Carregar para buscar as estatísticas da base.</div></div>
+        <div id="corpo-stats"><div class="cartao"><div class="aviso">Carregando…</div></div></div>
       </section>
 
       <!-- Versões -->
       <section id="aba-versoes" hidden>
-        <div class="ferramentas"><button class="fantasma" id="btn-carregar-versoes">Carregar</button></div>
+        <div class="painel" id="painel-versoes"></div>
         <div class="cartao lista">
-          <div class="cabecalho" style="grid-template-columns:minmax(0,1fr) auto auto">
+          <div class="cabecalho" style="grid-template-columns:minmax(0,1fr) auto minmax(0,1.4fr)">
             <div>Versão</div><div>Aparelhos</div><div class="direita">Participação</div>
           </div>
           <div id="linhas-versoes"></div>
-          <div id="recado-versoes" class="aviso">Toque em Carregar para ver a distribuição de versões.</div>
+          <div id="recado-versoes" class="aviso">Carregando…</div>
         </div>
       </section>
     </main>
@@ -461,8 +471,8 @@ async function carregarDiagnosticos() {
   $("recado-diag").className = "aviso";
   $("recado-diag").textContent = "Carregando…";
   try {
-    const r = await chamar("admin_list_diagnostic_reports", { p_limit: 200 });
-    diagnosticos = r.reports || r.items || (Array.isArray(r) ? r : []);
+    const r = await chamar("admin_list_diagnostic_reports", {});
+    diagnosticos = r.reports || (Array.isArray(r) ? r : []);
     desenharDiagnosticos();
   } catch (e) {
     $("recado-diag").className = "aviso erro";
@@ -476,14 +486,22 @@ function desenharDiagnosticos() {
   $("linhas-diag").innerHTML = lista.map(d => {
     const estado = (d.status || "novo").toLowerCase();
     const cor = estado === "resolvido" ? "s-ativa" : estado === "em_analise" ? "s-vencendo" : "s-neutro";
+    // Fabricante e modelo juntos: os relatórios que mais importam vêm de
+    // firmwares que matam serviço em segundo plano, e eles se reconhecem pela
+    // marca antes de qualquer outra coisa.
+    const aparelho = [d.manufacturer, d.model].filter(Boolean).join(" ") || "—";
+    const android = d.android_release ? `Android ${d.android_release}` : "";
     return `<div class="linha" style="grid-template-columns:minmax(0,2fr) minmax(0,3fr) auto auto;cursor:default">
       <div class="cortado">
-        <div class="forte cortado">${escapar(d.user_email || d.device_name || "—")}</div>
-        <div class="fraco cortado">${escapar(d.app_version || "")}</div>
+        <div class="forte cortado">${escapar(d.user_email || d.user_name || "sem conta")}</div>
+        <div class="fraco cortado">${escapar(aparelho)}${android ? " · " + android : ""}</div>
       </div>
-      <div class="cortado fraco">${escapar(d.message || d.error_code || d.summary || "—")}</div>
+      <div class="cortado fraco">
+        ${escapar(d.message || d.error_code || d.summary || "—")}
+        ${d.app_version_name ? `<span class="selo s-neutro" style="margin-left:6px">${escapar(d.app_version_name)}</span>` : ""}
+      </div>
       <div><span class="selo ${cor}">${escapar(estado)}</span></div>
-      <div class="direita fraco">${desde(d.created_at_ms || Date.parse(d.created_at || 0), relogio)}</div>
+      <div class="direita fraco">${desde(d.created_at_ms || Date.parse(d.created_at || 0) || 0, relogio)}</div>
     </div>`;
   }).join("");
   $("recado-diag").className = "aviso";
@@ -491,47 +509,216 @@ function desenharDiagnosticos() {
 }
 
 // ── Estatísticas ────────────────────────────────────────────────────────────
+/**
+ * Comportamento da BASE.
+ *
+ * A primeira versão desta aba despejava o JSON cru na tela, o que não é
+ * informação — é matéria-prima. A resposta de `admin_usage_statistics` tem
+ * estrutura conhecida (`accounts`, `funnel`, `events`, `screens`, `sources`,
+ * `per_user`), e é ela que responde as perguntas que fazem alguém abrir esta
+ * página: quantos usam de fato, onde as corridas se perdem, e quais telas
+ * seguram atenção.
+ */
+function pct(a, b) { return b > 0 ? Math.round(a * 100 / b) : 0; }
+
+function barra(valor, maximo, cor) {
+  const l = maximo > 0 ? Math.max(2, Math.round(valor * 100 / maximo)) : 0;
+  return `<div class="barra-fundo"><div class="barra-frente" style="width:${l}%${cor ? ";background:" + cor : ""}"></div></div>`;
+}
+
+function desenharEstatisticas(r) {
+  const acc = r.accounts || {}, f = r.funnel || {}, ev = r.events || {};
+  const lido = f.read || 0;
+
+  $("painel-stats").innerHTML = [
+    ["Contas com dados", acc.with_data || 0, ""],
+    ["Com corridas", acc.with_rides || 0, ""],
+    ["Ativas na semana", acc.active_week || 0, "color:var(--verde)"],
+    ["Solicitações lidas", lido.toLocaleString("pt-BR"), ""],
+    ["Conversão", pct(f.finished || 0, lido) + "%", "color:var(--azul)"]
+  ].map(([rot, val, est]) => `<div class="cartao">
+      <div class="numero" style="${est}">${val}</div>
+      <div class="sobrancelha" style="margin-top:4px">${rot}</div>
+    </div>`).join("");
+
+  const partes = [];
+
+  // ── O funil ───────────────────────────────────────────────────────────────
+  // A pergunta que importa: de tudo que foi lido, o que virou corrida
+  // registrada e onde o resto se perdeu.
+  const etapas = [
+    ["Lidas", lido, "var(--azul)"],
+    ["Aceitas", f.accepted || 0, "var(--verde)"],
+    ["Finalizadas", f.finished || 0, "var(--verde)"],
+    ["Recusadas", f.rejected || 0, "var(--apagado)"],
+    ["Canceladas", f.canceled || 0, "var(--amarelo)"],
+    ["Perdidas", f.missed || 0, "var(--vermelho)"]
+  ];
+  partes.push(`<div class="cartao bloco">
+    <h2>Funil das solicitações</h2>
+    <div class="funil">${etapas.map(([rot, v, cor]) => `
+      <div class="etapa">
+        <div class="rot">${rot}</div>
+        ${barra(v, lido, cor)}
+        <div class="val">${v.toLocaleString("pt-BR")} <span class="fraco">${pct(v, lido)}%</span></div>
+      </div>`).join("")}
+    </div>
+    <p class="apoio" style="margin:14px 0 0">
+      Últimos 7 dias: ${(f.read_week || 0).toLocaleString("pt-BR")} lidas ·
+      ${(f.finished_week || 0).toLocaleString("pt-BR")} finalizadas
+      (${pct(f.finished_week || 0, f.read_week || 0)}% de conversão).
+    </p>
+  </div>`);
+
+  // ── A janela de aceite ────────────────────────────────────────────────────
+  // Distingue "a janela não é vista" de "é vista e ignorada" — sem isto, zero
+  // toques e zero exibições contam a mesma história.
+  const exibida = ev.accept_shown || 0, tocada = ev.accept_tapped || 0;
+  partes.push(`<div class="cartao bloco">
+    <h2>Janela de aceite</h2>
+    ${exibida > 0
+      ? `<div class="etapa"><div class="rot">Toques por exibição</div>
+           ${barra(tocada, exibida, "var(--verde)")}
+           <div class="val">${pct(tocada, exibida)}%</div></div>
+         <p class="apoio" style="margin:12px 0 0">
+           Apareceu ${exibida.toLocaleString("pt-BR")} vezes e foi tocada
+           ${tocada.toLocaleString("pt-BR")}.</p>`
+      : `<p class="apoio" style="margin:0">Sem exibições medidas ainda — diferente de zero por cento.</p>`}
+  </div>`);
+
+  // ── Telas ─────────────────────────────────────────────────────────────────
+  const telas = (r.screens || []).slice().sort((a, b) => (b.ms || 0) - (a.ms || 0)).slice(0, 12);
+  if (telas.length) {
+    const maior = telas[0].ms || 1;
+    partes.push(`<div class="cartao bloco">
+      <h2>Telas por tempo de uso</h2>
+      <div class="funil">${telas.map(t => `
+        <div class="etapa">
+          <div class="rot cortado">${escapar(t.name)}</div>
+          ${barra(t.ms || 0, maior, "var(--azul)")}
+          <div class="val">${duracao(t.ms || 0)} <span class="fraco">${t.hits || 0}×</span></div>
+        </div>`).join("")}
+      </div>
+    </div>`);
+  }
+
+  // ── Fontes ────────────────────────────────────────────────────────────────
+  const fontes = (r.sources || []).slice().sort((a, b) => (b.read_count || 0) - (a.read_count || 0));
+  if (fontes.length) {
+    const maior = fontes[0].read_count || 1;
+    partes.push(`<div class="cartao bloco">
+      <h2>Plataformas lidas</h2>
+      <div class="funil">${fontes.map(o => `
+        <div class="etapa">
+          <div class="rot cortado">${escapar(o.name)}</div>
+          ${barra(o.read_count || 0, maior, "var(--roxo)")}
+          <div class="val">${(o.read_count || 0).toLocaleString("pt-BR")}
+            <span class="fraco">${pct(o.finished_count || 0, o.read_count || 0)}% conv.</span></div>
+        </div>`).join("")}
+      </div>
+    </div>`);
+  }
+
+  // ── Atalhos e eventos ─────────────────────────────────────────────────────
+  const eventos = Object.entries(ev).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 16);
+  if (eventos.length) {
+    const maior = eventos[0][1];
+    partes.push(`<div class="cartao bloco">
+      <h2>Ações mais usadas</h2>
+      <div class="funil">${eventos.map(([k, v]) => `
+        <div class="etapa">
+          <div class="rot cortado">${escapar(k.replace(/_/g, " "))}</div>
+          ${barra(v, maior, "var(--amarelo)")}
+          <div class="val">${v.toLocaleString("pt-BR")}</div>
+        </div>`).join("")}
+      </div>
+    </div>`);
+  }
+
+  // ── Por conta ─────────────────────────────────────────────────────────────
+  const porConta = (r.per_user || []).slice().sort((a, b) => (b.read || 0) - (a.read || 0)).slice(0, 20);
+  if (porConta.length) {
+    partes.push(`<div class="cartao lista bloco">
+      <h2 style="padding:14px 14px 0">Contas que mais leem</h2>
+      <div class="cabecalho" style="grid-template-columns:minmax(0,2fr) auto auto auto">
+        <div>Conta</div><div>Lidas</div><div>Finalizadas</div><div class="direita">Conversão</div>
+      </div>
+      ${porConta.map(u => {
+        const email = (dispositivos.find(d => d.user_id === u.user_id) || {}).user_email;
+        return `<div class="linha" style="grid-template-columns:minmax(0,2fr) auto auto auto;cursor:default">
+          <div class="cortado forte">${escapar(email || u.user_id.slice(0, 8) + "…")}</div>
+          <div class="fraco">${u.read || 0}</div>
+          <div class="fraco">${u.finished || 0}</div>
+          <div class="direita forte">${pct(u.finished || 0, u.read || 0)}%</div>
+        </div>`;
+      }).join("")}
+    </div>`);
+  }
+
+  $("corpo-stats").innerHTML = partes.join("");
+}
+
 async function carregarEstatisticas() {
-  $("corpo-stats").className = "aviso";
-  $("corpo-stats").textContent = "Carregando…";
   try {
     const r = await chamar("admin_usage_statistics", {});
-    const numeros = Object.entries(r).filter(([, v]) => typeof v === "number");
-    $("painel-stats").innerHTML = numeros.map(([k, v]) => `
-      <div class="cartao">
-        <div class="numero">${v.toLocaleString("pt-BR")}</div>
-        <div class="sobrancelha" style="margin-top:4px">${escapar(k.replace(/_/g, " "))}</div>
-      </div>`).join("");
-    $("corpo-stats").className = "";
-    $("corpo-stats").innerHTML =
-      `<div class="sobrancelha" style="margin-bottom:10px">Resposta completa</div>
-       <pre style="margin:0;overflow:auto;font-size:12px;color:var(--apagado)">${escapar(JSON.stringify(r, null, 2))}</pre>`;
+    if (r.status && r.status !== "ok") throw new Error("Sem permissão para as estatísticas.");
+    desenharEstatisticas(r);
   } catch (e) {
-    $("corpo-stats").className = "aviso erro";
-    $("corpo-stats").textContent = e.message;
+    $("painel-stats").innerHTML = "";
+    $("corpo-stats").innerHTML = `<div class="cartao"><div class="aviso erro">${escapar(e.message)}</div></div>`;
   }
 }
 
 // ── Versões ─────────────────────────────────────────────────────────────────
+/**
+ * A resposta vem por APARELHO, e a pergunta é por VERSÃO.
+ *
+ * Saber que o aparelho X está na 1.2.1.4 não decide nada; saber que 12% da base
+ * ainda está numa versão anterior decide — é o que diz se uma correção já
+ * chegou em quem precisava dela.
+ */
 async function carregarVersoes() {
-  $("recado-versoes").className = "aviso";
-  $("recado-versoes").textContent = "Carregando…";
   try {
     const r = await chamar("admin_user_versions", {});
-    const linhas = r.versions || r.items || (Array.isArray(r) ? r : []);
-    const total = linhas.reduce((s, v) => s + (v.device_count || v.count || 0), 0) || 1;
-    $("linhas-versoes").innerHTML = linhas.map(v => {
-      const n = v.device_count || v.count || 0;
-      const pct = Math.round(n * 100 / total);
-      return `<div class="linha" style="grid-template-columns:minmax(0,1fr) auto auto;cursor:default">
-        <div class="forte">${escapar(v.app_version || v.version || "—")}</div>
-        <div class="fraco">${n}</div>
-        <div class="direita forte">${pct}%</div>
-      </div>`;
-    }).join("");
+    const aparelhos = r.devices || r.versions || (Array.isArray(r) ? r : []);
+    const porVersao = new Map();
+    aparelhos.forEach(d => {
+      const nome = d.app_version_name || d.version_name || "desconhecida";
+      const atual = porVersao.get(nome) || { nome, n: 0, codigo: d.app_version_code || 0 };
+      atual.n++;
+      porVersao.set(nome, atual);
+    });
+    const lista = [...porVersao.values()].sort((a, b) => b.n - a.n);
+    const total = aparelhos.length || 1;
+    const maisNova = lista.slice().sort((a, b) => (b.codigo || 0) - (a.codigo || 0))[0];
+    const naMaisNova = maisNova ? maisNova.n : 0;
+
+    $("painel-versoes").innerHTML = [
+      ["Aparelhos", total, ""],
+      ["Versões em uso", lista.length, ""],
+      ["Na mais recente", pct(naMaisNova, total) + "%", "color:var(--verde)"],
+      ["Atrasados", (total - naMaisNova).toLocaleString("pt-BR"),
+        total - naMaisNova ? "color:var(--amarelo)" : ""]
+    ].map(([rot, val, est]) => `<div class="cartao">
+        <div class="numero" style="${est}">${val}</div>
+        <div class="sobrancelha" style="margin-top:4px">${rot}</div>
+      </div>`).join("");
+
+    $("linhas-versoes").innerHTML = lista.map(v => `
+      <div class="linha" style="grid-template-columns:minmax(0,1fr) auto minmax(0,1.4fr);cursor:default">
+        <div class="forte">${escapar(v.nome)}${maisNova && v.nome === maisNova.nome
+          ? ' <span class="selo s-ativa">atual</span>' : ""}</div>
+        <div class="fraco">${v.n}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          ${barra(v.n, total, maisNova && v.nome === maisNova.nome ? "var(--verde)" : "var(--apagado)")}
+          <span class="forte" style="min-width:44px;text-align:right">${pct(v.n, total)}%</span>
+        </div>
+      </div>`).join("");
+
     $("recado-versoes").className = "aviso";
-    $("recado-versoes").textContent = linhas.length ? `${linhas.length} versões em uso` : "Sem dados.";
+    $("recado-versoes").textContent = lista.length ? "" : "Sem dados de versão.";
   } catch (e) {
+    $("painel-versoes").innerHTML = "";
     $("recado-versoes").className = "aviso erro";
     $("recado-versoes").textContent = e.message;
   }
@@ -543,10 +730,28 @@ function mostrarPainel(token, email) {
   $("tela-entrar").hidden = true;
   $("tela-painel").hidden = false;
   $("linha-conta").textContent = email;
+  carregarTudo();
+}
+
+/**
+ * Busca as quatro abas de uma vez, em paralelo.
+ *
+ * Havia um botão "Carregar" em cada aba, e ele existia por medo de gastar
+ * chamada à toa. O medo estava mal colocado: quem abre este painel abre para
+ * OLHAR, e uma tela vazia esperando um toque não é economia — é trabalho
+ * empurrado para quem já veio buscar a resposta.
+ *
+ * Em paralelo, e não em fila, porque as quatro consultas são independentes: a
+ * mais lenta define a espera, em vez da soma de todas.
+ */
+function carregarTudo() {
   carregarContas().catch(e => {
     $("recado-painel").className = "aviso erro";
     $("recado-painel").textContent = e.message;
   });
+  carregarDiagnosticos();
+  carregarEstatisticas();
+  carregarVersoes();
 }
 
 $("btn-google").onclick = entrarComGoogle;
@@ -562,9 +767,6 @@ $("btn-entrar").onclick = async () => {
 $("senha").addEventListener("keydown", e => { if (e.key === "Enter") $("btn-entrar").click(); });
 $("busca").addEventListener("input", desenharLinhas);
 $("busca-diag").addEventListener("input", desenharDiagnosticos);
-$("btn-carregar-diag").onclick = carregarDiagnosticos;
-$("btn-carregar-stats").onclick = carregarEstatisticas;
-$("btn-carregar-versoes").onclick = carregarVersoes;
 
 document.querySelectorAll("[data-filtro]").forEach(b => {
   b.onclick = () => {
@@ -574,9 +776,7 @@ document.querySelectorAll("[data-filtro]").forEach(b => {
   };
 });
 
-$("btn-recarregar").onclick = () => carregarContas().catch(e => {
-  $("recado-painel").className = "aviso erro"; $("recado-painel").textContent = e.message;
-});
+$("btn-recarregar").onclick = carregarTudo;
 $("btn-sair").onclick = () => {
   // `sessionStorage` e não `localStorage`: fechar a aba encerra a sessão. Num
   // painel que lista a base inteira, sessão que sobrevive ao navegador é risco
