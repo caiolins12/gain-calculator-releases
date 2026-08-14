@@ -1,0 +1,349 @@
+<!--
+  Painel administrativo do Gain Calculator.
+
+  ── Por que existe fora do app ──────────────────────────────────────────────
+  A tela de administração dentro do aplicativo tem 3.550 linhas e viaja no APK
+  de TODO motorista para servir uma pessoa. Aqui ela não pesa em ninguém.
+
+  ── Como a segurança funciona ───────────────────────────────────────────────
+  Esta página NÃO tem senha própria, e isso é deliberado. Uma senha escrita no
+  código de uma página estática é legível por qualquer visitante e fica gravada
+  no histórico do repositório para sempre — e não protegeria nada, porque quem
+  lê o código chama a API direto, sem passar pelo formulário.
+
+  Quem autoriza é o servidor, como já acontece no aplicativo: o login abaixo
+  entra na conta real do Supabase, e as funções `admin_*` recusam qualquer
+  chamada que não venha de uma conta administradora. Trocar a senha da conta
+  fecha esta página junto.
+
+  A chave anônima abaixo é pública por natureza — ela é a mesma que o aplicativo
+  distribui em todo APK, e sozinha não dá acesso a nada. A chave `service_role`
+  NUNCA deve aparecer aqui.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gain Calculator — Administração</title>
+
+<style>
+  :root {
+    --fundo: #0B0F14;
+    --superficie: #141B24;
+    --borda: #2A3341;
+    --texto: #E6EDF3;
+    --apagado: #9AA7B8;
+    --verde: #22C55E;
+    --amarelo: #EAB308;
+    --vermelho: #EF4444;
+    --azul: #3B82F6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--fundo);
+    color: var(--texto);
+    font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  .envelope { max-width: 1180px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 22px; letter-spacing: -0.4px; margin: 0 0 4px; }
+  .sub { color: var(--apagado); font-size: 13px; margin-bottom: 24px; }
+
+  .cartao {
+    background: var(--superficie);
+    border: 1px solid var(--borda);
+    border-radius: 14px;
+    padding: 18px;
+  }
+  .entrar { max-width: 380px; margin: 12vh auto 0; }
+  label { display: block; font-size: 12px; color: var(--apagado); margin: 12px 0 4px; }
+  input {
+    width: 100%; padding: 11px 12px; border-radius: 9px;
+    border: 1px solid var(--borda); background: #0F151D; color: var(--texto);
+    font-size: 15px;
+  }
+  button {
+    margin-top: 16px; width: 100%; padding: 12px; border: 0; border-radius: 9px;
+    background: var(--azul); color: #fff; font-weight: 700; font-size: 15px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  button.discreto {
+    width: auto; margin: 0; padding: 7px 12px; font-size: 13px;
+    background: transparent; border: 1px solid var(--borda); color: var(--apagado);
+  }
+
+  .recado { margin-top: 14px; font-size: 13px; color: var(--vermelho); }
+  .recado.neutro { color: var(--apagado); }
+
+  .resumo { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 18px; }
+  .numero { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+  .rotulo { font-size: 12px; color: var(--apagado); text-transform: uppercase; letter-spacing: .06em; }
+
+  .barra { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .barra input { flex: 1; min-width: 200px; }
+
+  .rolagem { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 780px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--borda); white-space: nowrap; }
+  th { color: var(--apagado); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  tbody tr:hover { background: #182029; }
+
+  .selo {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 700;
+  }
+  .ativa   { background: rgba(34,197,94,.15);  color: var(--verde); }
+  .vencendo{ background: rgba(234,179,8,.15);  color: var(--amarelo); }
+  .vencida { background: rgba(239,68,68,.15);  color: var(--vermelho); }
+  .vitalicia{ background: rgba(59,130,246,.15); color: var(--azul); }
+  .ponto { color: var(--verde); }
+</style>
+
+<div class="envelope">
+
+  <!-- ── Entrada ───────────────────────────────────────────────────────── -->
+  <section id="tela-entrar" class="cartao entrar">
+    <h1>Administração</h1>
+    <p class="sub">Entre com a conta administradora do Gain Calculator.</p>
+    <label for="email">E-mail</label>
+    <input id="email" type="email" autocomplete="username" placeholder="voce@exemplo.com">
+    <label for="senha">Senha</label>
+    <input id="senha" type="password" autocomplete="current-password">
+    <button id="btn-entrar">Entrar</button>
+    <div id="recado-entrar" class="recado"></div>
+  </section>
+
+  <!-- ── Painel ────────────────────────────────────────────────────────── -->
+  <section id="tela-painel" hidden>
+    <div class="barra">
+      <div style="flex:1">
+        <h1>Contas e dispositivos</h1>
+        <p class="sub" id="linha-conta" style="margin:0"></p>
+      </div>
+      <button class="discreto" id="btn-recarregar">Recarregar</button>
+      <button class="discreto" id="btn-sair">Sair</button>
+    </div>
+
+    <div class="resumo" id="resumo"></div>
+
+    <div class="barra">
+      <input id="busca" placeholder="Filtrar por e-mail, nome ou aparelho…">
+    </div>
+
+    <div class="cartao rolagem">
+      <table>
+        <thead>
+          <tr>
+            <th>Conta</th>
+            <th>Aparelho</th>
+            <th>Licença</th>
+            <th>Visto por último</th>
+            <th>Uso total</th>
+            <th>Sessões</th>
+          </tr>
+        </thead>
+        <tbody id="corpo"></tbody>
+      </table>
+      <div id="recado-painel" class="recado neutro"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+// ── Configuração ────────────────────────────────────────────────────────────
+// A chave anônima é pública por natureza: é a mesma embutida em todo APK, e
+// sozinha não abre nada. Quem decide o que pode ser lido são as políticas do
+// banco e as funções `admin_*`.
+const SUPABASE_URL = "https://wckwpfaagvzppuzlnwbx.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indja3dwZmFhZ3Z6cHB1emxud2J4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4MDE5NjcsImV4cCI6MjA5MjM3Nzk2N30.M-fcU5zIsr6PwBRqJZv3v0MQdHBCCpC_zm7g0tB8U_k";
+
+const CHAVE_SESSAO = "gain_admin_sessao";
+
+// ── Utilidades ──────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+
+/** Milissegundos em "há 3 h" — o painel do app usa a mesma leitura. */
+function desde(ms, agora) {
+  if (!ms) return "—";
+  const s = Math.max(0, Math.floor((agora - ms) / 1000));
+  if (s < 60) return "agora";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `há ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `há ${h} h`;
+  return `há ${Math.floor(h / 24)} d`;
+}
+
+/** Duração de uso acumulado, em horas e minutos. */
+function duracao(ms) {
+  if (!ms) return "—";
+  const min = Math.floor(ms / 60000);
+  const h = Math.floor(min / 60);
+  return h > 0 ? `${h}h ${min % 60}min` : `${min}min`;
+}
+
+/**
+ * Estado da licença.
+ *
+ * A mesma regra do aplicativo (`licenseStatusOf`): vitalícia vence tudo, e
+ * "vencendo" é a faixa de sete dias que justifica um contato antes de perder o
+ * usuário.
+ */
+function estadoDaLicenca(expiryMs, vitalicia, agora) {
+  if (vitalicia) return ["vitalicia", "Vitalícia"];
+  if (!expiryMs) return ["vencida", "Sem licença"];
+  const dias = Math.floor((expiryMs - agora) / 86400000);
+  if (dias < 0) return ["vencida", "Vencida"];
+  if (dias <= 7) return ["vencendo", `${dias} d`];
+  return ["ativa", `${dias} d`];
+}
+
+// ── Conversa com o servidor ─────────────────────────────────────────────────
+async function entrar(email, senha) {
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password: senha })
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error_description || j.msg || "E-mail ou senha incorretos.");
+  return j.access_token;
+}
+
+/**
+ * Chama uma função `admin_*` do banco.
+ *
+ * O token vai no cabeçalho e é ele que identifica quem está pedindo. Se a conta
+ * não for administradora, a própria função recusa — esta página não tem, e não
+ * deve ter, nenhuma verificação própria de permissão.
+ */
+async function chamar(nome, token, corpo = {}) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${nome}`, {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(corpo)
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.message || `Falha em ${nome} (${r.status}).`);
+  return j;
+}
+
+// ── Tela ────────────────────────────────────────────────────────────────────
+let dispositivos = [];
+let relogioDoServidor = Date.now();
+
+function desenharResumo() {
+  const agora = relogioDoServidor;
+  const contas = new Set(dispositivos.filter(d => d.user_id).map(d => d.user_id));
+  const online = dispositivos.filter(d => d.last_seen_ms && agora - d.last_seen_ms < 5 * 60000).length;
+  const ativas = dispositivos.filter(d =>
+    d.is_lifetime || (d.expiry_ms && d.expiry_ms > agora)).length;
+
+  $("resumo").innerHTML = [
+    ["Contas", contas.size],
+    ["Aparelhos", dispositivos.length],
+    ["Licenças ativas", ativas],
+    ["Online agora", online]
+  ].map(([rotulo, valor]) => `
+    <div class="cartao">
+      <div class="numero">${valor}</div>
+      <div class="rotulo">${rotulo}</div>
+    </div>`).join("");
+}
+
+function desenharTabela() {
+  const agora = relogioDoServidor;
+  const busca = $("busca").value.trim().toLowerCase();
+  const lista = dispositivos.filter(d => {
+    if (!busca) return true;
+    return [d.user_email, d.user_name, d.device_name, d.user_phone]
+      .some(v => (v || "").toLowerCase().includes(busca));
+  });
+
+  $("corpo").innerHTML = lista.map(d => {
+    const [classe, texto] = estadoDaLicenca(d.expiry_ms, d.is_lifetime, agora);
+    const online = d.last_seen_ms && agora - d.last_seen_ms < 5 * 60000;
+    const conta = d.user_email || "<span style='color:var(--apagado)'>sem conta</span>";
+    const nome = d.user_name ? `<div style="color:var(--apagado);font-size:12px">${d.user_name}</div>` : "";
+    return `<tr>
+      <td>${conta}${nome}</td>
+      <td>${d.device_name || "—"}</td>
+      <td><span class="selo ${classe}">${texto}</span></td>
+      <td>${online ? '<span class="ponto">● online</span>' : desde(d.last_seen_ms, agora)}</td>
+      <td>${duracao(d.total_usage_ms)}</td>
+      <td>${d.session_count || 0}</td>
+    </tr>`;
+  }).join("");
+
+  $("recado-painel").textContent = lista.length
+    ? `${lista.length} de ${dispositivos.length} aparelhos`
+    : "Nenhum aparelho corresponde ao filtro.";
+}
+
+async function carregar(token) {
+  $("recado-painel").textContent = "Carregando…";
+  const resposta = await chamar("admin_list_devices", token);
+  if (resposta.status !== "ok") {
+    throw new Error("Esta conta não tem permissão de administração.");
+  }
+  // Alinha o relógio do painel ao do banco, como o app faz: os "há X h" e o
+  // "online agora" são calculados sobre esta base, e o relógio do navegador
+  // pode estar minutos fora.
+  relogioDoServidor = resposta.server_time_ms || Date.now();
+  dispositivos = resposta.devices || [];
+  desenharResumo();
+  desenharTabela();
+}
+
+function mostrarPainel(token, email) {
+  sessionStorage.setItem(CHAVE_SESSAO, JSON.stringify({ token, email }));
+  $("tela-entrar").hidden = true;
+  $("tela-painel").hidden = false;
+  $("linha-conta").textContent = email;
+  carregar(token).catch(e => { $("recado-painel").textContent = e.message; });
+}
+
+// ── Ligações ────────────────────────────────────────────────────────────────
+$("btn-entrar").onclick = async () => {
+  const botao = $("btn-entrar");
+  const recado = $("recado-entrar");
+  recado.textContent = "";
+  botao.disabled = true;
+  botao.textContent = "Entrando…";
+  try {
+    const email = $("email").value.trim();
+    const token = await entrar(email, $("senha").value);
+    mostrarPainel(token, email);
+  } catch (e) {
+    recado.textContent = e.message;
+  } finally {
+    botao.disabled = false;
+    botao.textContent = "Entrar";
+  }
+};
+
+$("senha").addEventListener("keydown", e => { if (e.key === "Enter") $("btn-entrar").click(); });
+$("busca").addEventListener("input", desenharTabela);
+
+$("btn-recarregar").onclick = () => {
+  const s = JSON.parse(sessionStorage.getItem(CHAVE_SESSAO) || "{}");
+  if (s.token) carregar(s.token).catch(e => { $("recado-painel").textContent = e.message; });
+};
+
+$("btn-sair").onclick = () => {
+  // `sessionStorage` e não `localStorage`: fechar a aba encerra a sessão. Num
+  // painel que lista a base inteira, uma sessão que sobrevive ao navegador é
+  // um risco desnecessário.
+  sessionStorage.removeItem(CHAVE_SESSAO);
+  location.reload();
+};
+
+// Sessão da aba atual, se houver.
+(() => {
+  const s = JSON.parse(sessionStorage.getItem(CHAVE_SESSAO) || "{}");
+  if (s.token) mostrarPainel(s.token, s.email);
+})();
+</script>
