@@ -9,110 +9,316 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- Gerado por tools/gerar-paginas-legais.mjs a partir de
+         app/src/main/java/com/gaincalculator/app/data/LegalDocuments.kt.
+         Não edite à mão: a próxima geração sobrescreve. -->
     <main class="container">
         <header class="page-header">
             <p class="eyebrow">Gain Calculator</p>
             <h1>Política de Privacidade</h1>
             <p class="subtitle">Como tratamos seus dados no Gain Calculator</p>
-            <p class="meta">Versão 4 &middot; Vigente desde 12 de maio de 2026</p>
+            <p class="meta">Versão 8 &middot; Vigente desde 31 de agosto de 2026</p>
         </header>
 
         <section class="legal-section">
             <h2>1. Quem somos</h2>
-            <p>O Gain Calculator ("nós", "app") é um aplicativo voltado a motoristas de aplicativo que ajuda no acompanhamento financeiro das corridas. Esta Política descreve quais dados tratamos, com qual finalidade, com quem compartilhamos e os direitos que você tem como titular dessas informações, em conformidade com a Lei Geral de Proteção de Dados (Lei nº 13.709/2018 - LGPD).</p>
+            <p>O Gain Calculator ("nós", "app") é um aplicativo voltado a motoristas de aplicativo que ajuda no acompanhamento financeiro das corridas. Esta Política descreve quais dados tratamos, com qual finalidade, com quem compartilhamos e os direitos que você tem como titular dessas informações, em conformidade com a Lei Geral de Proteção de Dados (Lei nº 13.709/2018 - LGPD).
+
+Para os fins da LGPD, somos o CONTROLADOR dos dados descritos nesta Política, com a ressalva importante da seção 3: em relação aos dados de passageiros e de terceiros que aparecem na tela do aplicativo de transporte, quem decide registrá-los é você, e o nosso papel é de operador a seu serviço.
+
+Contato para qualquer assunto desta Política, inclusive exercício de direitos: <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a>.</p>
         </section>
 
         <section class="legal-section">
             <h2>2. Dados que coletamos</h2>
-            <p>• Dados de cadastro: nome, e-mail, número de telefone celular e senha. A senha é armazenada de forma cifrada pelo nosso provedor de autenticação (Supabase) e nunca trafega nem é guardada em texto claro. O número de telefone é coletado obrigatoriamente no momento do cadastro e é confirmado por meio de um código (OTP) enviado por SMS/WhatsApp. Esse código é gerenciado pelo provedor de autenticação (Supabase) e por uma operadora de mensageria parceira (por exemplo, Twilio). O telefone é utilizado exclusivamente para (i) confirmar a identidade do titular no cadastro, (ii) prevenir fraudes e abuso de testes gratuitos, e (iii) viabilizar atendimento de suporte quando você nos solicitar. Não utilizamos seu telefone para envio de comunicação comercial, propaganda ou marketing.
-• Identificadores do dispositivo: hash criptográfico (HMAC-SHA256) do identificador Android, modelo, fabricante e sistema operacional do aparelho. O identificador original do Android nunca é enviado ao servidor — apenas o hash, que serve para vincular a licença ao dispositivo e prevenir uso indevido.
-• Dados financeiros e operacionais: valores de corridas, distâncias, durações, datas, endereços de origem e destino, app de origem da corrida (Uber, 99, etc.), avaliação registrada, receitas, despesas, metas e configurações que você cria no app. Esses dados ficam armazenados no seu dispositivo (banco de dados local) e, quando você está autenticado, também são sincronizados na sua conta para que possa restaurá-los em uma reinstalação ou outro aparelho.
-• Preferências de configuração: limites de aceite, perfil de consumo do veículo, lista de aplicativos que você escolheu monitorar e demais ajustes feitos na tela de Ajustes.
-• Métricas de uso: data, horário e duração de cada sessão em que o app é mantido em primeiro plano. Essas métricas são associadas ao hash do dispositivo e são usadas para fins administrativos e de melhoria do serviço.
-• Dados de pagamento: quando você adquire uma licença, recebemos do processador de pagamento o status (aprovado, pendente, recusado), o método utilizado e, opcionalmente, o e-mail informado no checkout. Não armazenamos números completos de cartão; eles são processados diretamente pela operadora.
-• Dados gerados pelo monitoramento de tela: enquanto o monitoramento está ativo, o app utiliza a permissão de captura de tela do Android para ler informações exibidas por aplicativos de transporte por aplicativo (preço, distância, origem e destino) e calcular o ganho real. O reconhecimento de texto roda localmente no seu dispositivo (Google ML Kit on-device). As imagens capturadas não são enviadas para servidores externos — apenas os dados estruturados da corrida podem ser sincronizados na sua conta, se você estiver autenticado.</p>
+            <p>• Dados de cadastro: nome, e-mail, número de telefone celular e senha. A senha é armazenada de forma cifrada pelo nosso provedor de autenticação (Supabase) e nunca trafega nem é guardada em texto claro. O número de telefone é coletado obrigatoriamente no momento do cadastro e é confirmado por meio de um código (OTP) enviado por WhatsApp ou SMS. O telefone é utilizado para (i) confirmar a identidade do titular no cadastro, (ii) prevenir fraudes e abuso de testes gratuitos, (iii) viabilizar atendimento de suporte quando você nos solicitar, e (iv) enviar comunicados de serviço sobre o app, na forma e com o direito de recusa descritos na seção 17. Não vendemos, cedemos nem alugamos o seu telefone a ninguém, e não o usamos para publicidade de terceiros.
+• Dados da conta Google, se você entrar com o Google: recebemos do Google o seu nome, o e-mail e o endereço da sua foto de perfil, apenas para criar e identificar a sua conta e exibir o seu avatar dentro do app. A foto é baixada diretamente do Google pelo seu aparelho e guardada em cache local; não a copiamos para os nossos servidores. Nós não recebemos a sua senha do Google nem qualquer acesso a Gmail, Drive, Agenda ou Contatos.
+• Identificadores do dispositivo: hash criptográfico (HMAC-SHA256) do identificador Android, modelo, fabricante, sistema operacional e versão do app instalada. O identificador original do Android nunca é enviado ao servidor — apenas o hash, que serve para vincular a licença ao dispositivo e prevenir uso indevido.
+• Dados financeiros e operacionais das corridas: valores de corridas, distâncias, durações, datas, app de origem da corrida (Uber, 99, etc.), avaliação registrada, receitas, despesas, metas e configurações que você cria no app. Esses dados ficam armazenados no seu dispositivo (banco de dados local) e, quando você está autenticado, também são sincronizados na sua conta para que possa restaurá-los em uma reinstalação ou outro aparelho.
+• Solicitações lidas, aceitas ou não: o app guarda também as corridas que apenas foram OFERECIDAS a você e que você não aceitou, para exibir a lista de últimas solicitações e alimentar os relatórios. Essa lista é aparada automaticamente e não cresce indefinidamente.
+• Dados de passageiros e de terceiros exibidos na tela: nome do passageiro, avaliação e endereços de embarque e desembarque. Por serem dados de pessoas que não são você, têm seção própria — ver a seção 3.
+• Lista de aplicativos instalados com ícone na tela inicial: o app consulta o sistema para montar a lista em que você escolhe o que monitorar e para conseguir devolver você ao aplicativo da corrida com um toque. Essa consulta acontece no seu aparelho, a lista não é enviada aos nossos servidores, e o app não usa a permissão de acesso irrestrito a pacotes (QUERY_ALL_PACKAGES).
+• Preferências de configuração: limites de aceite, perfil de consumo do veículo, tipo de veículo (carro ou moto), lista de aplicativos que você escolheu monitorar e demais ajustes feitos na tela de Ajustes.
+• Chave Pix de recebimento (opcional): se você utilizar o recurso de receber pagamentos por QR Pix, os dados que você mesmo informa — chave, tipo de chave, nome do recebedor e cidade — ficam guardados no dispositivo e sincronizados na sua conta para montar o QR Code. Esses dados servem apenas para gerar o código que você mostra ao passageiro; nós não intermediamos, recebemos nem temos visibilidade sobre esses pagamentos, que ocorrem diretamente entre você e o pagador.
+• Estatísticas de uso: ver a seção 6 desta Política, que descreve em detalhe o que é medido e o que deliberadamente não é.
+• Dados de pagamento da assinatura: quando você adquire uma licença, recebemos do processador de pagamento o status (aprovado, pendente, recusado), o método utilizado, o valor e o e-mail informado no checkout. Não armazenamos números completos de cartão; eles são processados diretamente pela operadora.</p>
         </section>
 
         <section class="legal-section">
-            <h2>3. Uso do Serviço de Acessibilidade do Android</h2>
-            <p>O Gain Calculator declara, no manifesto, um Serviço de Acessibilidade do Android (denominado "Leitor de Corrida"). Esse serviço é necessário para que o app consiga identificar quando os aplicativos de transporte por aplicativo (Uber, 99, inDriver e similares) exibem uma proposta de corrida e capturar, a partir do conteúdo de tela exibido naquele momento, os dados estruturados da proposta — valor, distância, duração, origem e destino — para calcular o ganho líquido real (descontando custo de combustível, manutenção e demais despesas configuradas por você).</p>
-            <p><strong>O que o serviço FAZ:</strong></p>
-            <p>• Lê, em primeiro plano e somente quando o monitoramento está ativo, o texto exibido na tela pelos aplicativos de transporte que você selecionou monitorar.<br>
-• Extrai apenas os campos numéricos e textuais da proposta de corrida (preço, km, minutos, origem/destino, app de origem, avaliação).<br>
-• Processa essas informações localmente no seu dispositivo e exibe o resultado em uma sobreposição.</p>
-            <p><strong>O que o serviço NÃO faz:</strong></p>
-            <p>• Não realiza nenhum tipo de ação automatizada na interface — não clica em botões, não aceita corridas, não recusa corridas, não navega entre telas de outros aplicativos em seu nome.<br>
-• Não captura senhas, dados bancários, mensagens privadas, conteúdo de WhatsApp/Telegram/SMS, conteúdo de e-mails ou qualquer texto digitado por você em outros aplicativos.<br>
-• Não grava áudio, vídeo nem screenshots dos aplicativos lidos.<br>
-• Não envia para servidores externos o conteúdo bruto da tela. Apenas os dados estruturados da corrida (valor, distância, duração etc.) podem ser sincronizados na sua conta quando você está autenticado, e somente para fins de histórico, relatórios e portabilidade entre dispositivos.</p>
-            <p><strong>Como ativar/desativar:</strong> a ativação do serviço de acessibilidade é totalmente opcional, exige consentimento explícito seu nas configurações do Android (Configurações → Acessibilidade → Aplicativos instalados → Gain Calculator) e pode ser revogada por você a qualquer momento pelo mesmo caminho. Quando o serviço está desativado, todas as demais funcionalidades do app continuam disponíveis — você apenas perde a leitura automatizada das propostas de corrida.</p>
-            <p><strong>Base legal (LGPD):</strong> execução de contrato e legítimo interesse na prestação do serviço solicitado por você (artigo 7º, V e IX da LGPD).</p>
+            <h2>3. Dados de passageiros e de terceiros</h2>
+            <p>Esta é a seção mais importante desta Política, porque trata de dados de pessoas que nunca instalaram o nosso app e nunca falaram conosco.
+
+Quando o monitoramento está ativo e você trabalha, a tela do aplicativo de transporte mostra informações do passageiro. O Gain Calculator lê e guarda as seguintes, quando aparecem:
+• O PRIMEIRO NOME (ou o nome exibido) do passageiro, usado para saber qual corrida está em andamento, distinguir uma corrida da seguinte e identificar o lançamento no seu Extrato.
+• A avaliação do passageiro (a nota exibida pela plataforma).
+• Os endereços de embarque e desembarque da corrida — rua, número, bairro e o nome do local quando exibido.
+
+O que NÃO é lido nem guardado: telefone do passageiro, foto, mensagens trocadas no chat da plataforma, dados de pagamento dele, sobrenome completo quando a plataforma não o exibe, e qualquer coordenada geográfica.
+
+Esses endereços referem-se exclusivamente à origem e ao destino da solicitação apresentada pelo aplicativo de transporte — não são, em hipótese alguma, o seu endereço residencial, comercial ou de cobrança. Nenhuma coordenada geográfica (GPS, latitude ou longitude) é coletada em momento algum.
+
+Papéis de cada um: quem decide registrar a corrida é você, para a sua própria contabilidade e para o seu histórico de trabalho. Em relação a esses dados, você atua como controlador e nós atuamos como OPERADOR — guardamos, sincronizamos entre os seus aparelhos e devolvemos para você, seguindo a sua instrução. Não usamos esses dados para nenhuma finalidade própria além de operar o serviço para você.
+
+Os nossos compromissos sobre esses dados:
+• Ficam isolados na SUA conta. Nenhum outro usuário tem acesso a eles, e as regras de segurança do banco (Row Level Security) impedem o acesso cruzado entre contas.
+• Não são vendidos, cedidos, licenciados nem compartilhados com plataformas de transporte, seguradoras, empresas de crédito, anunciantes ou qualquer terceiro.
+• Não são usados para traçar perfil de passageiro, montar lista de recusa, pontuar pessoas ou alimentar qualquer base compartilhada entre motoristas.
+• Não integram as estatísticas de uso (seção 6) e não vão para ferramenta de analytics alguma.
+• São apagados quando você apaga o histórico de corridas, quando apaga apenas os endereços pelo controle granular dos Ajustes, ou quando exclui a conta.
+
+Sua responsabilidade: como esses são dados de outra pessoa, você se compromete a utilizá-los somente para o seu controle financeiro e operacional, e a não divulgá-los, publicá-los ou usá-los para constranger, expor ou identificar publicamente qualquer passageiro. Isso vale inclusive para os prints e as gravações que ficam no seu aparelho.</p>
         </section>
 
         <section class="legal-section">
-            <h2>4. Recursos opcionais que utilizam câmera e microfone</h2>
-            <p>O app oferece, como recurso opcional, a possibilidade de gravar vídeo curto da câmera frontal com áudio do microfone, exclusivamente para fins de registro local pelo próprio motorista. Esses arquivos são gravados em formato MP4 e salvos apenas na biblioteca de mídia do seu dispositivo (pasta pública "Movies/GainCalculator"). Nós não acessamos, transmitimos ou armazenamos esses vídeos em nossos servidores. Você pode desativar ou simplesmente não acionar esses recursos pelos controles do app, e pode excluir os arquivos a qualquer momento pelo gerenciador de arquivos do dispositivo.</p>
+            <h2>4. Leitura da tela durante o monitoramento</h2>
+            <p>Este é o recurso central do app e merece descrição própria.
+
+Enquanto o monitoramento está ativo, o Gain Calculator lê o conteúdo exibido na tela pelos aplicativos de transporte que VOCÊ selecionou na lista de aplicativos monitorados. Tudo passa por uma única permissão: o serviço de acessibilidade do Android, que você ativa manualmente e pode revogar quando quiser.
+
+A leitura acontece por dois caminhos, que se complementam:
+
+• Árvore de acessibilidade: o app consulta a janela em primeiro plano para ler os textos da solicitação de corrida (preço, distância, tempo, avaliação e nome do passageiro, endereços).
+• Foto da tela tirada pelo próprio serviço de acessibilidade: quando o aplicativo de transporte desenha a solicitação como imagem e não há texto para ler, o serviço pede ao sistema uma imagem da tela e faz o reconhecimento óptico dela. O app NÃO usa a permissão de projeção de mídia (compartilhamento de tela) — não há pedido de "gravar ou transmitir a tela" e não aparece o ícone de transmissão no seu aparelho.
+
+Em ambos os casos, o reconhecimento de texto roda LOCALMENTE no seu dispositivo (Google ML Kit on-device). As imagens da sua tela não são enviadas para nossos servidores nem para terceiros, e são descartadas da memória logo após o reconhecimento. Apenas os dados estruturados da corrida (preço, distância, endereços, nome do passageiro) podem ser sincronizados na sua conta, se você estiver autenticado.
+
+A leitura é restrita aos aplicativos que você marcou, mais os aplicativos de NAVEGAÇÃO mais comuns (Waze, Google Maps e Android Auto). A navegação entra porque as plataformas de transporte desenham a solicitação de corrida POR CIMA do aplicativo que estiver na tela: sem essa leitura, uma corrida oferecida enquanto você navega não seria lida. Essa leitura só acontece enquanto o monitoramento está ligado — com nenhum aplicativo marcado, o monitoramento é desativado por completo e nada é lido, inclusive nos navegadores.
+
+Fora disso, o app não lê a tela de aplicativos não selecionados, e mantém bloqueio permanente sobre categorias sensíveis — aplicativos de banco, mensageria e visualizadores de imagem não são lidos em nenhuma hipótese, mesmo que apareçam na tela.
+
+O app apenas LÊ. Ele não toca em botões, não aceita nem recusa corridas e não executa nenhuma ação dentro de outros aplicativos em seu nome. Você pode desligar o serviço de acessibilidade a qualquer momento, nos Ajustes do Android, e o monitoramento cessa imediatamente.
+
+Se você ativar o recurso opcional de Captura de Tela automática, o app salva na galeria do seu aparelho (pasta pública "Pictures/GainCalculator") uma imagem de cada solicitação detectada. Essas imagens ficam somente no seu dispositivo, sob seu controle, e não são enviadas a nós nem a terceiros. Como elas contêm o nome do passageiro e os endereços da corrida, valem para elas os mesmos cuidados da seção 3.</p>
         </section>
 
         <section class="legal-section">
-            <h2>5. O que NÃO coletamos</h2>
-            <p>• Não coletamos dados de localização (GPS, latitude/longitude).
+            <h2>5. Leitura de um print escolhido por você</h2>
+            <p>Além do monitoramento, o app oferece um atalho para registrar lançamentos a partir de uma imagem: você toca em "ler do print", o Android abre o seletor de fotos, você escolhe UMA imagem e o app lê o texto dela para preencher o formulário.
+
+Como isso funciona, exatamente:
+• O app NÃO tem permissão de acesso à sua galeria e não consegue listar, procurar ou abrir nenhuma outra foto. Quem abre o seletor é o próprio sistema Android, e o app recebe acesso apenas ao arquivo que você apontou, apenas naquele momento.
+• O reconhecimento de texto roda localmente no seu dispositivo. A imagem não é enviada a nós nem a terceiros, não é copiada para dentro do app e não fica guardada.
+• Do texto reconhecido, o app aproveita somente o que serve ao lançamento (valor, data, descrição). O restante é descartado ao fechar a tela.
+
+Este recurso funciona com o monitoramento desligado e não depende do serviço de acessibilidade.</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>6. Estatísticas de uso e melhoria do aplicativo</h2>
+            <p>Para decidir o que melhorar, o app registra estatísticas sobre COMO ele é usado. Descrevemos aqui exatamente o que é medido, porque a diferença entre uma métrica de produto e um rastro de comportamento está nos detalhes.
+
+O que é registrado:
+• Tempo de monitoramento: início e duração dos períodos em que você manteve o monitoramento ligado. É a medida de uso real do produto — não é tempo de tela do app, porque o motorista usa o Gain com o aplicativo de transporte à frente.
+• Tempo por tela: o nome de cada tela do app (por exemplo, "Relatórios") e o total de milissegundos que ela ficou visível, além do número de vezes que foi aberta.
+• Contadores de eventos: totais de ações relevantes do produto, como quantas vezes a janela de aceite foi exibida, tocada ou dispensada, e quantas corridas foram finalizadas. São apenas nomes de evento e contagens.
+• Tipo de veículo declarado e versão do app instalada.
+
+O que NÃO é registrado, por decisão de projeto:
+• Nenhum carimbo de hora por evento e nenhuma ordem de navegação. Não é possível reconstruir o que você fez, nem quando, a partir desses dados.
+• Nenhum conteúdo de corrida, endereço, nome de passageiro, valor ou texto lido da tela integra as estatísticas de uso.
+• Nenhuma ferramenta de analytics de terceiros. Não usamos Firebase Analytics, Google Analytics, ferramentas de attribution ou SDKs de publicidade. Esses números não saem da nossa infraestrutura e não são vendidos, cedidos ou compartilhados com ninguém.
+
+Finalidade: identificar quais recursos são realmente usados, onde o app falha ou confunde, e priorizar correções e melhorias. Um exemplo concreto do porquê disso importar: sem saber se uma janela é pouco vista ou vista e ignorada, a correção necessária seria escolhida no palpite.
+
+Base legal: legítimo interesse (art. 7º, IX da LGPD) em aprimorar o serviço prestado a você, tratado sempre de forma agregada e limitada ao mínimo necessário. Você pode se opor a esse tratamento a qualquer momento escrevendo para <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a> — o pedido será atendido sem qualquer prejuízo ao seu acesso aos recursos do app.</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>7. Relatórios de diagnóstico</h2>
+            <p>Quando o monitoramento apresenta falha, o app pode gerar um relatório técnico para que possamos investigar. O envio depende de uma ação sua: existir um erro pendente E você tocar em "enviar relatório".
+
+Esse relatório inclui: modelo, marca e fabricante do aparelho, versão do Android, versão do app, o código e a mensagem do erro, quantas vezes ele ocorreu, e um trecho recente do registro técnico (log) do próprio app. Para permitir o retorno, o relatório vem acompanhado do seu nome e e-mail de cadastro.
+
+O log enviado contém apenas mensagens produzidas pelo Gain Calculator sobre o funcionamento do monitoramento. Ele é usado exclusivamente para diagnóstico técnico e descartado quando o caso é encerrado.</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>8. Rastro de operação do programa de testadores</h2>
+            <p>Esta seção vale APENAS para quem entrou no programa de testadores. Se você nunca resgatou um código de testador, nada do que está descrito aqui acontece na sua conta, e o envio permanece desligado.
+
+Por que existe: uma queixa do tipo "várias solicitações não foram lidas" só pode ser investigada com o registro do que o monitoramento decidiu, minuto a minuto — e esse registro fica no aparelho de quem está dirigindo, a quilômetros de distância. Toda investigação que depende de uma ação de quem está no volante é uma investigação que não acontece.
+
+O que sobe, para contas de testadores: o registro técnico das decisões do monitoramento, que CONTÉM dados de operação — endereços lidos, valores, distâncias, horários, o aplicativo de origem e o motivo de cada decisão —, acompanhado do seu e-mail, do hash do dispositivo e da versão do app.
+
+Como sobe: automaticamente, a cada cinco minutos, enquanto o monitoramento estiver ligado, sem pedir nada a você no momento do envio — o acordo foi feito na entrada do programa. Há teto por lote e teto diário, para que o recurso não vire uma torneira aberta no seu plano de dados.
+
+Quem pode ligar: a inscrição é conferida no SERVIDOR, não no aplicativo. Uma conta que não está no programa recebe recusa e o envio se desliga sozinho.
+
+Retenção: 30 dias, e depois o registro é apagado. É mais que o programa inteiro de um testador e o suficiente para investigar uma queixa que demora a chegar.
+
+Base legal: consentimento (art. 7º, I da LGPD), manifestado ao aderir ao programa de testadores, em que o acompanhamento aprofundado é a contrapartida da licença concedida. Você pode revogar esse consentimento a qualquer momento escrevendo para <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a>: desligamos o envio da sua conta e apagamos os rastros já enviados, sem que isso afete a licença que você já recebeu.</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>9. Recursos opcionais de câmera e microfone</h2>
+            <p>O app oferece, como recurso opcional que só funciona quando você o aciona, a gravação de vídeo com áudio, para registro local pelo próprio motorista.
+
+O que a gravação pode incluir:
+• A câmera FRONTAL, que filma o interior do veículo — você e quem estiver no carro.
+• A câmera TRASEIRA, que filma a via à frente — o formato de dashcam.
+• As duas ao mesmo tempo, com os dois vídeos unidos depois num arquivo só, no arranjo que você escolher.
+• O áudio do microfone do aparelho ou, se você estiver com um fone Bluetooth conectado, o microfone do fone.
+
+Onde os arquivos ficam: gravados em MP4 e salvos apenas na biblioteca de mídia do seu dispositivo (pasta pública "Movies/GainCalculator"). Nós não acessamos, não transmitimos e não armazenamos esses vídeos em nossos servidores, e não temos como recuperá-los se você os apagar. Você pode excluí-los a qualquer momento pelo gerenciador de arquivos ou pela galeria do aparelho.
+
+Quem responde pelo conteúdo: a gravação registra imagem e voz de outras pessoas — passageiros, pedestres, outros motoristas. Em relação a esse material, o controlador é VOCÊ: foi você quem decidiu gravar, o arquivo é seu, fica no seu aparelho e só você decide o que fazer com ele. Cabe a você observar a legislação aplicável, informar quem está sendo gravado quando a lei exigir e não usar o material para expor, constranger ou difamar ninguém. As obrigações correspondentes estão na seção 8 dos Termos de Uso.
+
+Enquanto a gravação está ativa, o Android exibe os indicadores de câmera e microfone em uso, e o app mantém uma notificação permanente — não existe gravação silenciosa.</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>10. Notificações que o app envia</h2>
+            <p>O app usa notificações no seu aparelho para três coisas, todas geradas localmente e sem envio de dados a terceiros:
+
+• Notificações de funcionamento: a notificação permanente do monitoramento e da janela sobreposta, exigidas pelo Android para que o serviço continue rodando enquanto você dirige, e o aviso de corrida finalizada.
+• Lembretes do seu próprio uso: o resumo semanal (domingo à noite) e o lembrete de sequência de dias trabalhados. Montados no aparelho, a partir dos dados que já estão nele.
+• Avisos de vencimento da licença: 5, 2 e 1 dia antes da data de expiração.
+
+As notificações de funcionamento não podem ser desligadas sem desligar o recurso correspondente. Todas as demais podem ser silenciadas individualmente pelos canais de notificação, nos Ajustes do Android, sem qualquer perda de funcionalidade.</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>11. O que NÃO coletamos</h2>
+            <p>• Não coletamos dados de localização (GPS, latitude/longitude). O app não pede permissão de localização.
+• Não coletamos o seu endereço residencial, comercial ou de cobrança. Os únicos endereços armazenados pelo app são os pontos de embarque e desembarque exibidos nas solicitações de corrida.
 • Não acessamos sua agenda de contatos, mensagens (SMS/WhatsApp), histórico de chamadas ou e-mails.
-• Não acessamos sua galeria de fotos.
+• Não navegamos pela sua galeria de fotos. O app ESCREVE nela os arquivos que você pediu — as gravações de vídeo e, se ativado, os prints das solicitações — e só consegue LER a imagem única que você escolher no seletor do Android para a leitura por print (seção 5).
+• Não pedimos a permissão de projeção de mídia (compartilhamento ou gravação da tela). A imagem da tela usada pelo reconhecimento vem do próprio serviço de acessibilidade.
+• Não lemos a tela de aplicativos que você não selecionou, e nunca a de aplicativos de banco, mensageria ou visualizadores de imagem.
 • Não controlamos, automatizamos ou clicamos em botões de outros aplicativos. O Gain Calculator apenas lê o que aparece na tela quando o monitoramento está ativo — nunca aceita ou recusa corridas em seu nome.
-• Não utilizamos plataformas de publicidade, analytics de terceiros (como Firebase Analytics, Google Analytics ou similares) nem ferramentas de attribution. O app não exibe anúncios.</p>
+• Não utilizamos plataformas de publicidade, analytics de terceiros nem ferramentas de attribution. O app não exibe anúncios.
+• Não vendemos, alugamos nem cedemos dados pessoais a quem quer que seja.</p>
         </section>
 
         <section class="legal-section">
-            <h2>6. Como usamos seus dados</h2>
-            <p>Utilizamos as informações para: (i) autenticar você na sua conta; (ii) fornecer os recursos de cálculo, histórico, sincronização e relatórios; (iii) sincronizar suas configurações e seus dados entre dispositivos; (iv) gerenciar a licença, processar pagamentos e prevenir fraudes; (v) prestar suporte técnico; (vi) gerar métricas administrativas agregadas sobre uso do serviço; (vii) cumprir obrigações legais e regulatórias.</p>
+            <h2>12. Como usamos seus dados</h2>
+            <p>Utilizamos as informações para: (i) autenticar você na sua conta; (ii) fornecer os recursos de cálculo, histórico, sincronização e relatórios; (iii) sincronizar suas configurações e seus dados entre dispositivos; (iv) gerenciar a licença, processar pagamentos e prevenir fraudes; (v) prestar suporte técnico e investigar falhas; (vi) medir o uso do app para corrigir problemas e priorizar melhorias, na forma da seção 6; (vii) enviar comunicados de serviço sobre o app, na forma da seção 17; (viii) cumprir obrigações legais e regulatórias.</p>
         </section>
 
         <section class="legal-section">
-            <h2>7. Operadores e compartilhamento de dados</h2>
+            <h2>13. Bases legais do tratamento</h2>
+            <p>• Execução de contrato (art. 7º, V): cadastro, autenticação, licenciamento, sincronização dos seus dados e prestação dos recursos do app.
+• Consentimento (art. 7º, I): leitura da tela durante o monitoramento, gravação por câmera e microfone, captura automática de prints, leitura de um print escolhido por você, envio de relatórios de diagnóstico e rastro do programa de testadores. Todos dependem de permissão que você concede e pode revogar a qualquer momento nos Ajustes do Android ou do próprio app.
+• Legítimo interesse (art. 7º, IX): estatísticas de uso para melhoria do serviço, medidas de prevenção a fraude e a uso indevido de licenças, e comunicados de serviço sobre o funcionamento do app.
+• Cumprimento de obrigação legal ou regulatória (art. 7º, II): guarda de registros exigidos por lei.
+
+Para os dados de passageiros e terceiros (seção 3), atuamos como operador e o tratamento se dá por instrução sua, no seu interesse legítimo de manter o controle da própria atividade profissional.</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>14. Operadores e compartilhamento de dados</h2>
             <p>Para viabilizar o serviço, compartilhamos dados estritamente necessários com os seguintes operadores, cada um com sua própria política de privacidade:
 
-• Supabase (Supabase Inc.): provedor de autenticação, banco de dados e funções serverless. Recebe seus dados de cadastro (incluindo número de telefone), hash do dispositivo, dados financeiros e configurações sincronizados.
-• Operadora de mensageria SMS/WhatsApp (por exemplo, Twilio Inc.): recebe o seu número de telefone exclusivamente para entregar o código de verificação (OTP) no momento do cadastro ou ao alterar o telefone na sua conta. Não compartilhamos com a operadora qualquer outro dado pessoal além do número e do código.
-• Mercado Pago (Mercado Pago S.A.): processamento de pagamentos. Recebe o valor, o método de pagamento e, opcionalmente, o e-mail informado por você no checkout.
+• Supabase (Supabase Inc.): provedor de autenticação, banco de dados e funções serverless. Recebe seus dados de cadastro (incluindo número de telefone), hash do dispositivo, dados financeiros e das corridas, estatísticas de uso e configurações sincronizados.
+• Google LLC (Sign in with Google), se você optar por entrar com o Google: a Google sabe que você entrou no Gain Calculator e nos devolve nome, e-mail e o endereço da sua foto de perfil.
+• Serviço de mensageria por WhatsApp/SMS: recebe o seu número de telefone para entregar o código de verificação (OTP) e os comunicados de serviço da seção 17. Utilizamos uma infraestrutura de envio operada por nós, sobre a plataforma WhatsApp. Não compartilhamos com esse canal qualquer outro dado pessoal além do número e do conteúdo da mensagem.
+• Mercado Pago (Mercado Pago S.A.): processamento de pagamentos da assinatura. Recebe o valor, o método de pagamento e o e-mail informado por você no checkout.
 • Google LLC (Google ML Kit): biblioteca de reconhecimento de texto. O processamento ocorre localmente no dispositivo; não há envio das imagens da sua tela para a Google.
+• Google LLC (Play Integrity API): para verificar que o app é a versão legítima distribuída pela Play Store e que o aparelho não foi adulterado, o app solicita ao Google um atestado de integridade. A Google recebe sinais técnicos do dispositivo e do aplicativo; nós recebemos apenas o resultado da verificação. Esse mecanismo protege sua licença contra fraude e não coleta dados pessoais seus.
+• Google LLC (Google Play): distribuição do aplicativo e de suas atualizações.
 
-Não vendemos seus dados pessoais a terceiros. Não compartilhamos seus dados para publicidade direcionada.</p>
+Não vendemos seus dados pessoais a terceiros. Não compartilhamos seus dados para publicidade direcionada. Nenhum dado é compartilhado com as plataformas de transporte (Uber, 99, inDrive e outras), com as quais não temos qualquer vínculo.</p>
         </section>
 
         <section class="legal-section">
-            <h2>8. Armazenamento e segurança</h2>
-            <p>Os dados sincronizados são armazenados em servidores com criptografia em trânsito (TLS) e em repouso. Adotamos boas práticas de segurança — controle de acesso, princípio do menor privilégio, separação de ambientes, regras de Row Level Security (RLS) no banco de dados e cache local assinado contra adulteração. Nenhum sistema é 100% imune a incidentes; em caso de violação relevante, comunicaremos os usuários afetados e as autoridades quando exigido por lei.</p>
+            <h2>15. Transferência internacional de dados</h2>
+            <p>Parte da nossa infraestrutura e dos nossos operadores está sediada fora do Brasil. Em particular, os dados sincronizados na sua conta são armazenados em servidores do Supabase, e os serviços da Google (autenticação, integridade e distribuição do app) são prestados por empresa estrangeira.
+
+Essas transferências são realizadas nos termos do art. 33 da LGPD, quando necessárias para a execução do contrato celebrado com você e mediante cláusulas contratuais que obrigam o operador a garantir nível de proteção compatível com o da legislação brasileira. Você pode solicitar informações adicionais sobre essas transferências pelo e-mail <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a>.</p>
         </section>
 
         <section class="legal-section">
-            <h2>9. Retenção</h2>
-            <p>Mantemos os dados enquanto sua conta estiver ativa ou enquanto forem necessários para cumprir obrigações legais e contratuais. Você pode solicitar a exclusão da conta a qualquer momento pelo canal de contato indicado nesta política. Após a exclusão, os dados pessoais associados à conta são removidos em prazo razoável (até 30 dias), exceto registros que precisem ser conservados por exigência legal (por exemplo, comprovantes fiscais ou registros de prevenção a fraude).</p>
+            <h2>16. Acesso interno e administração</h2>
+            <p>Dizemos com todas as letras o que muitas políticas deixam implícito: existem administradores do Gain Calculator que podem consultar dados de contas individuais.
+
+O que esse acesso alcança: o cadastro (nome, e-mail, telefone), o estado da licença e dos pagamentos, os aparelhos vinculados, as estatísticas de uso e — na tela de detalhe de uma conta — números agregados a partir dos dados que você sincroniza, como total de ganhos, corridas registradas e aplicativos de origem.
+
+Para que serve: prestar suporte, investigar falhas relatadas, apurar fraude no uso de licenças e acompanhar a saúde do produto.
+
+Os limites que aplicamos:
+• O acesso é restrito a contas expressamente marcadas como administradoras, e essa verificação é feita no servidor, em cada chamada — não em uma tela que possa ser contornada.
+• Vale o princípio do menor privilégio: consultamos o necessário para resolver o caso em questão.
+• Administradores não têm acesso às suas gravações de vídeo, aos prints salvos na sua galeria nem a qualquer conteúdo que permaneça apenas no seu aparelho.
+• Dados de contas não são usados para finalidade comercial própria, não são compartilhados e não alimentam qualquer produto derivado.</p>
         </section>
 
         <section class="legal-section">
-            <h2>10. Seus direitos (LGPD)</h2>
-            <p>Nos termos da LGPD, você tem o direito de, a qualquer momento: confirmar a existência de tratamento; acessar seus dados; corrigir dados incompletos, inexatos ou desatualizados; solicitar a anonimização, bloqueio ou eliminação de dados desnecessários ou tratados em desconformidade; obter a portabilidade; revogar o consentimento; e ser informado sobre o compartilhamento. Para exercer seus direitos, escreva para <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a> informando o e-mail cadastrado e o pedido desejado.</p>
+            <h2>17. Comunicados que enviamos</h2>
+            <p>Podemos enviar a você comunicados sobre o serviço — aviso de manutenção, mudança relevante nos documentos legais, falha conhecida e sua correção, vencimento de licença e novidades da versão — por notificação no app, por e-mail ou por mensagem no WhatsApp do número que você verificou no cadastro.
+
+Os limites que assumimos:
+• Só enviamos para números que passaram pela verificação, e nunca para números obtidos de outra forma.
+• Não vendemos, cedemos nem alugamos o seu número, e não o usamos para publicidade de terceiros.
+• Todo comunicado indica quem o enviou e como pedir para não receber mais.
+• Você pode recusar os comunicados a qualquer momento, respondendo à própria mensagem ou escrevendo para <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a>. A recusa é atendida sem qualquer prejuízo ao seu acesso ao app.
+
+Mesmo após a recusa, continuaremos enviando as mensagens estritamente necessárias à relação contratual — código de verificação, confirmação de pagamento e avisos legais obrigatórios —, porque sem elas o serviço não funciona.
+
+Base legal: legítimo interesse (art. 7º, IX) para comunicados de serviço, e execução de contrato (art. 7º, V) para as mensagens transacionais.</p>
         </section>
 
         <section class="legal-section">
-            <h2>11. Cookies e identificadores</h2>
-            <p>O app não utiliza cookies de navegação. Utilizamos identificadores técnicos (hash do dispositivo e tokens de sessão) para vincular a licença ao aparelho e manter você logado entre sessões.</p>
+            <h2>18. Armazenamento e segurança</h2>
+            <p>Os dados sincronizados são armazenados em servidores com criptografia em trânsito (TLS) e em repouso. Adotamos boas práticas de segurança — controle de acesso, princípio do menor privilégio, separação de ambientes, regras de Row Level Security (RLS) no banco de dados e cache local assinado contra adulteração.
+
+No seu aparelho, o backup automático do Android está DESLIGADO para este app. É uma escolha deliberada: o banco local guarda histórico de corridas, ganhos, endereços e nomes de passageiros, e com o backup ligado esse banco sairia do aparelho pelo Google Drive, fora do nosso controle e do seu. Não há perda: os seus dados sobem para a sua conta e voltam no login, inclusive em aparelho novo.
+
+Nenhum sistema é 100% imune a incidentes. Em caso de incidente de segurança que possa acarretar risco ou dano relevante, comunicaremos os titulares afetados e a Autoridade Nacional de Proteção de Dados (ANPD) em prazo razoável, na forma do art. 48 da LGPD, informando o que aconteceu, quais dados foram atingidos e o que fazer a respeito.</p>
         </section>
 
         <section class="legal-section">
-            <h2>12. Crianças e adolescentes</h2>
-            <p>O Gain Calculator é destinado a maiores de 18 anos, motoristas de aplicativo. Não coletamos intencionalmente dados de crianças ou adolescentes. Caso identifiquemos cadastro de menor de idade, a conta será excluída.</p>
+            <h2>19. Retenção</h2>
+            <p>Mantemos os dados enquanto sua conta estiver ativa ou enquanto forem necessários para cumprir obrigações legais e contratuais. Os prazos específicos são:
+
+• Dados de cadastro, corridas, lançamentos e configurações: enquanto a conta existir.
+• Rastro do programa de testadores: 30 dias a partir do envio, com apagamento automático.
+• Relatórios de diagnóstico: até o encerramento do caso a que se referem.
+• Códigos de verificação (OTP): minutos, apenas o tempo de validade do código.
+• Registros de pagamento: pelo prazo exigido pela legislação fiscal e de defesa do consumidor, mesmo após a exclusão da conta, restritos ao mínimo necessário.
+
+Você pode solicitar a exclusão da conta a qualquer momento pelo próprio app ou pelo canal de contato indicado nesta Política. Após a exclusão, os dados pessoais associados à conta são removidos em prazo razoável (até 30 dias), exceto registros que precisem ser conservados por exigência legal.
+
+Os arquivos que ficam apenas no seu aparelho — vídeos e prints — não são apagados por nós, porque nunca tivemos acesso a eles. Continuam com você até que você os apague.</p>
         </section>
 
         <section class="legal-section">
-            <h2>13. Alterações nesta Política</h2>
-            <p>Podemos atualizar esta Política para refletir melhorias no serviço, mudanças nos operadores ou exigências legais. Em caso de alterações relevantes, solicitaremos novamente o seu aceite no próximo login.</p>
+            <h2>20. Decisões automatizadas</h2>
+            <p>O app classifica cada solicitação de corrida (por exemplo, com um indicador de "boa" ou "ruim") aplicando os parâmetros que VOCÊ configurou — custo de combustível, consumo do veículo, valor mínimo por quilômetro e por hora.
+
+Essa classificação é uma sugestão de cálculo exibida a você, e nada mais: quem aceita ou recusa a corrida é você, o app não age em seu nome, e o resultado não é comunicado a nenhuma plataforma, empregador ou terceiro.
+
+Não realizamos tratamento automatizado que defina perfil pessoal, de crédito, de consumo ou de personalidade, nem decisão automatizada que produza efeitos jurídicos sobre você. Ainda assim, o direito de revisão previsto no art. 20 da LGPD está assegurado: escreva para <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a> e explicaremos a lógica do cálculo.</p>
         </section>
 
         <section class="legal-section">
-            <h2>14. Contato e encarregado</h2>
-            <p>Em caso de dúvidas, solicitações ou reclamações sobre o tratamento dos seus dados, entre em contato pelo e-mail <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a>. Esse é também o canal para exercer os seus direitos previstos na LGPD.</p>
+            <h2>21. Seus direitos (LGPD)</h2>
+            <p>Nos termos da LGPD, você tem o direito de, a qualquer momento: confirmar a existência de tratamento; acessar seus dados; corrigir dados incompletos, inexatos ou desatualizados; solicitar a anonimização, bloqueio ou eliminação de dados desnecessários ou tratados em desconformidade; obter a portabilidade; revogar o consentimento; opor-se a tratamento fundado em legítimo interesse; ser informado sobre o compartilhamento; e ser informado sobre a possibilidade de não fornecer consentimento e as consequências disso.
+
+Para exercer seus direitos, escreva para <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a> informando o e-mail cadastrado e o pedido desejado. Respondemos em até 15 dias. Alguns pedidos podem ser atendidos imediatamente pelo próprio app: a exclusão da conta e a limpeza seletiva de histórico, endereços e lançamentos estão nos Ajustes.
+
+Se entender que o seu pedido não foi adequadamente atendido, você pode apresentar reclamação à Autoridade Nacional de Proteção de Dados (ANPD).</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>22. Cookies e identificadores</h2>
+            <p>O app não utiliza cookies de navegação. Utilizamos identificadores técnicos (hash do dispositivo e tokens de sessão) para vincular a licença ao aparelho e manter você logado entre sessões. As páginas públicas dos nossos documentos legais são estáticas e não instalam cookies nem rastreadores.</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>23. Crianças e adolescentes</h2>
+            <p>O Gain Calculator é destinado a maiores de 18 anos, motoristas de aplicativo — o que decorre da própria atividade, que exige habilitação e cadastro nas plataformas. Não coletamos intencionalmente dados de crianças ou adolescentes. Caso identifiquemos cadastro de menor de idade, a conta será excluída e os dados associados eliminados.</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>24. Alterações nesta Política</h2>
+            <p>Podemos atualizar esta Política para refletir melhorias no serviço, mudanças nos operadores ou exigências legais. Toda versão traz número e data de vigência no topo. Em caso de alterações relevantes, solicitaremos novamente o seu aceite na próxima abertura do app — e o acesso aos recursos fica bloqueado até que você leia e decida.
+
+A versão vigente está sempre disponível dentro do app e na página pública dos nossos documentos legais.</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>25. Contato e encarregado</h2>
+            <p>Em caso de dúvidas, solicitações ou reclamações sobre o tratamento dos seus dados, entre em contato pelo e-mail <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a>. Esse é também o canal do nosso encarregado pelo tratamento de dados pessoais (DPO), nos termos do art. 41 da LGPD, e o canal para exercer os direitos previstos na seção 21.</p>
         </section>
 
         <footer class="page-footer">
