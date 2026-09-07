@@ -51,7 +51,7 @@
     detail: null,
     detailTab: "summary",
     detailData: new Map(),
-    broadcast: { mode: "verified", manual: "", message: "", recipients: null, sending: false, sent: 0, total: 0, results: [] },
+    broadcast: { mode: "verified", manual: "", message: "", search: "", sentMessage: "", sentAt: 0, recipients: null, sending: false, sent: 0, total: 0, results: [] },
     timers: { clock: null, health: null, whatsapp: null }
   };
 
@@ -1419,30 +1419,219 @@
     return state.broadcast.mode === "verified" ? (state.broadcast.recipients || []) : manualRecipients();
   }
 
+  function onlyDigits(value) { return String(value ?? "").replace(/\D/g, ""); }
+
+  /* O DDD serve de "inicial" do número na lista, como as iniciais do nome
+     fazem nas outras telas. */
+  function phoneDdd(raw) {
+    const digits = onlyDigits(raw);
+    const local = digits.startsWith("55") ? digits.slice(2) : digits;
+    return local.slice(0, 2) || "??";
+  }
+
+  /* 5511987654321 -> +55 (11) 98765-4321. Fora do formato brasileiro, mostra os
+     dígitos como vieram: inventar uma máscara esconderia um número torto. */
+  function phoneLabel(raw) {
+    const digits = onlyDigits(raw);
+    const local = digits.startsWith("55") ? digits.slice(2) : digits;
+    if (local.length === 11) return `+55 (${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7)}`;
+    if (local.length === 10) return `+55 (${local.slice(0, 2)}) ${local.slice(2, 6)}-${local.slice(6)}`;
+    return `+${digits}`;
+  }
+
+  /* Estado de um número no disparo atual. "Enviado" quer dizer aceito pelo
+     servidor do WhatsApp — não é confirmação de leitura, e a tela diz isso. */
+  function deliveryFor(phone) {
+    const b = state.broadcast;
+    const hit = b.results.find((item) => onlyDigits(item.phone) === onlyDigits(phone));
+    if (hit) {
+      return hit.status === "sent"
+        ? { key: "sent", label: "Enviado", iconName: "check-double", tone: "is-sent" }
+        : { key: "failed", label: hit.error || "Falhou", iconName: "alert", tone: "is-failed" };
+    }
+    if (b.sending) return { key: "pending", label: "Na fila", iconName: "clock", tone: "" };
+    return { key: "draft", label: "Vai receber este comunicado", iconName: "", tone: "" };
+  }
+
+  function broadcastFilter(recipients) {
+    const query = onlyDigits(state.broadcast.search);
+    if (!state.broadcast.search.trim()) return recipients;
+    return query ? recipients.filter((phone) => onlyDigits(phone).includes(query)) : [];
+  }
+
   function renderBroadcast() {
     const b = state.broadcast;
     const recipients = selectedRecipients();
     const connected = whatsappConnected();
-    const header = pageHeading("Novo comunicado", "Monte a mensagem, escolha os destinatários e revise antes de iniciar o envio. O backend processa lotes de até cinco números.");
-    return header + `${!connected ? `<div class="notice notice--warning">${icon("alert")}<span><strong>WhatsApp não confirmado como operacional.</strong> Verifique a conexão antes de enviar qualquer comunicado. <button class="text-button" data-nav="whatsapp" style="margin-left:0.3125rem">Abrir WhatsApp</button></span></div>` : ""}<section class="broadcast-layout">
-      <article class="panel"><div class="panel-head"><div><h3 class="section-title">1. Mensagem</h3><p class="section-copy">Até 4.096 caracteres, enviados como texto</p></div><div class="mode-toggle"><button data-broadcast-mode="verified" aria-pressed="${b.mode === "verified"}">Verificados</button><button data-broadcast-mode="manual" aria-pressed="${b.mode === "manual"}">Lista manual</button></div></div>
-        <label class="field-label" for="broadcast-message">Conteúdo do comunicado</label><textarea id="broadcast-message" maxlength="4096" placeholder="Escreva uma mensagem objetiva para os usuários…">${esc(b.message)}</textarea><span id="broadcast-counter" class="message-counter">${count(b.message.length)} / 4.096</span>
-        ${b.mode === "manual" ? `<label class="field-label" for="broadcast-manual">Números, um por linha</label><textarea id="broadcast-manual" placeholder="5511999999999\n5511888888888">${esc(b.manual)}</textarea><p class="section-copy">Espaços e pontuação são removidos. Duplicados são consolidados.</p>` : `<div class="notice notice--info" style="margin-top:0.9375rem">${icon("shield")}<span>Somente números que concluíram a verificação por WhatsApp entram nesta lista.</span></div>`}
-        <div class="recipient-summary" style="margin-top:0.9375rem"><span class="attention-icon is-blue">${icon("users")}</span><span><strong id="recipient-count">${count(recipients.length)}</strong><small id="recipient-label">${b.mode === "verified" ? "números verificados" : "números válidos e únicos"}</small></span>${state.loading.recipients && b.mode === "verified" ? icon("loader", "icon spin") : ""}</div>
-        ${state.errors.recipients && b.mode === "verified" ? `<div class="notice notice--danger" style="margin-top:0.75rem">${icon("alert")}<span>${esc(state.errors.recipients)}</span></div>` : ""}
-        <div class="detail-actions" style="margin-top:1rem"><button id="broadcast-send" class="button button--primary" data-send-broadcast ${b.sending || !b.message.trim() || !recipients.length || !connected ? "disabled" : ""}>${b.sending ? icon("loader", "icon spin") : icon("send")} ${b.sending ? "Enviando…" : "Revisar e enviar"}</button>${b.mode === "verified" ? `<button class="button button--secondary" data-refresh-resource="recipients">${icon("refresh")} Atualizar destinatários</button>` : ""}</div>
-        ${b.sending || b.results.length ? renderBroadcastProgress() : ""}
-      </article>
-      <aside class="panel"><div class="panel-head"><div><h3 class="section-title">2. Prévia</h3><p class="section-copy">Como o texto será entregue</p></div></div><div id="message-preview" class="message-preview">${b.message.trim() ? esc(b.message) : "Sua mensagem aparecerá aqui."}</div><div class="info-list" style="margin-top:0.9375rem"><div class="info-row"><span>Canal</span><span>WhatsApp</span></div><div class="info-row"><span>Destinatários</span><span id="preview-recipient-count">${count(recipients.length)}</span></div><div class="info-row"><span>Lotes previstos</span><span id="preview-batch-count">${count(Math.ceil(recipients.length / 5))}</span></div><div class="info-row"><span>Histórico</span><span>Não persistido</span></div></div><div class="notice" style="margin:0.9375rem 0 0">${icon("alert")}<span>O servidor atual não armazena campanhas. Recarregar a página durante o envio impede retomar os lotes restantes.</span></div></aside>
-    </section>`;
+    const header = pageHeading(
+      "Comunicados",
+      "Funciona como um mensageiro: escolha quem recebe na lista, escreva no campo embaixo e dispare. Cada pessoa recebe uma mensagem individual, não um grupo."
+    );
+    const aviso = connected ? "" : `<div class="notice notice--warning">${icon("alert")}<span><strong>WhatsApp não confirmado como operacional.</strong> Verifique a conexão antes de enviar qualquer comunicado. <button class="text-button" data-nav="whatsapp" style="margin-left:0.3125rem">Abrir WhatsApp</button></span></div>`;
+    return header + aviso + `<section class="chat-shell">${renderBroadcastSide(recipients)}${renderBroadcastChat(recipients, connected)}</section>`;
+  }
+
+  function renderBroadcastSide(recipients) {
+    const b = state.broadcast;
+    const manual = b.mode === "manual";
+    const visiveis = manual ? recipients : broadcastFilter(recipients);
+    const carregando = state.loading.recipients && !manual;
+    const lotes = Math.ceil(recipients.length / 5);
+
+    const head = `<div class="chat-side-head">
+      <h3 class="section-title">Quem recebe</h3>
+      <div class="mode-toggle">
+        <button data-broadcast-mode="verified" aria-pressed="${!manual}">Verificados</button>
+        <button data-broadcast-mode="manual" aria-pressed="${manual}">Lista manual</button>
+      </div>
+    </div>`;
+
+    const corpo = manual
+      ? `<div class="chat-side-compose">
+          <label class="field-label" for="broadcast-manual">Um número por linha, com DDD</label>
+          <textarea id="broadcast-manual" placeholder="5511999999999&#10;5511888888888">${esc(b.manual)}</textarea>
+          <p class="section-copy" style="margin:0.5rem 0 0.75rem">Espaços e pontuação são ignorados. Repetidos contam uma vez só.</p>
+        </div>
+        <div id="recipient-list" class="chat-side-list">${renderRecipientRows(visiveis, recipients, false)}</div>`
+      : `<div class="chat-side-search"><label class="search-field">${icon("search")}<input id="broadcast-search" type="search" value="${esc(b.search)}" placeholder="Procurar um número…" aria-label="Procurar destinatário"></label></div>
+        <div id="recipient-list" class="chat-side-list">${carregando ? loadingState("Consultando quem está verificado…") : renderRecipientRows(visiveis, recipients, true)}</div>`;
+
+    const erro = state.errors.recipients && !manual
+      ? `<div class="notice notice--danger" style="margin:0 0.9375rem 0.75rem">${icon("alert")}<span>${esc(state.errors.recipients)}</span></div>`
+      : "";
+
+    return `<aside class="chat-side">${head}${corpo}${erro}<div class="chat-side-foot">
+      <span><strong id="recipient-count">${count(recipients.length)}</strong><small id="recipient-label">${recipients.length === 1 ? "destinatário" : "destinatários"} · <span id="batch-count">${count(lotes)}</span> ${lotes === 1 ? "lote" : "lotes"} de até 5</small></span>
+      ${manual ? "" : `<button class="button button--secondary button--compact" data-refresh-resource="recipients" aria-label="Atualizar lista">${icon("refresh")}</button>`}
+    </div></aside>`;
+  }
+
+  function renderRecipientRows(visiveis, todos, verificado) {
+    if (!todos.length) {
+      return `<p class="chat-side-empty">${verificado
+        ? "Nenhum número concluiu a verificação por WhatsApp ainda."
+        : "Escreva os números acima. Eles aparecem aqui conforme ficam válidos."}</p>`;
+    }
+    if (!visiveis.length) return `<p class="chat-side-empty">Nenhum número corresponde à busca. O envio continua indo para os ${count(todos.length)} da lista.</p>`;
+    const filtrando = visiveis.length !== todos.length;
+    const aviso = filtrando ? `<p class="chat-side-empty" style="padding:0.25rem 0.5rem 0.625rem">Mostrando ${count(visiveis.length)} de ${count(todos.length)} — o envio vai para todos.</p>` : "";
+    return aviso + visiveis.slice(0, 300).map((phone) => {
+      const entrega = deliveryFor(phone);
+      return `<div class="recipient-row">
+        <span class="avatar">${esc(phoneDdd(phone))}</span>
+        <span class="recipient-copy"><strong>${esc(phoneLabel(phone))}</strong><small>${esc(entrega.label)}</small></span>
+        ${entrega.iconName ? icon(entrega.iconName, `icon ${entrega.tone}`) : ""}
+      </div>`;
+    }).join("") + (visiveis.length > 300 ? `<p class="chat-side-empty">…e mais ${count(visiveis.length - 300)}. A lista mostra os 300 primeiros; o envio usa todos.</p>` : "");
+  }
+
+  function renderBroadcastChat(recipients, connected) {
+    const b = state.broadcast;
+    const texto = b.message.trim();
+    const enviados = b.results.filter((item) => item.status === "sent").length;
+    const falhas = b.results.filter((item) => item.status !== "sent").length;
+    const relogio = (ms) => new Date(ms || Date.now()).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    const hora = relogio();
+    const horaEnvio = relogio(b.sentAt);
+
+    const selo = b.sending
+      ? `${icon("loader", "icon spin")}`
+      : b.results.length
+        ? `${icon(falhas ? "alert" : "check-double", `icon ${falhas ? "is-failed" : "is-sent"}`)}`
+        : `${icon("clock")}`;
+
+    /* Duas bolhas, como em qualquer mensageiro: em cima o que já foi disparado,
+       com o estado da entrega; embaixo o rascunho que ainda está no campo. */
+    const enviada = b.sentMessage
+      ? `<div class="chat-bubble">${esc(b.sentMessage)}<span class="bubble-meta">${esc(horaEnvio)} ${selo}</span></div>${b.sending || b.results.length ? renderBroadcastProgress() : ""}`
+      : "";
+    const rascunho = `<div id="message-preview" class="chat-bubble${texto ? "" : " chat-bubble--vazia"}"><span id="message-preview-text">${texto ? esc(b.message) : (b.sentMessage ? "Escreva outro comunicado para disparar de novo." : "O texto que você escrever aparece aqui, do jeito que chega no WhatsApp.")}</span><span id="message-preview-meta" class="bubble-meta"${texto ? "" : " hidden"}>${hora} ${icon("clock")}</span></div>`;
+    const bolha = enviada + rascunho;
+
+    const enviavel = !b.sending && Boolean(texto) && recipients.length > 0 && connected;
+
+    return `<article class="chat-main">
+      <header class="chat-top">
+        <span class="chat-top-avatar">${icon("users")}</span>
+        <span class="chat-top-copy">
+          <strong>${count(recipients.length)} ${recipients.length === 1 ? "destinatário" : "destinatários"}</strong>
+          <small>${b.mode === "verified" ? "Números verificados" : "Lista manual"} · WhatsApp${connected ? "" : " · desconectado"}</small>
+        </span>
+        ${b.results.length ? pill(falhas ? `${count(enviados)} enviados · ${count(falhas)} falharam` : `${count(enviados)} enviados`, falhas ? "yellow" : "green") : ""}
+      </header>
+
+      <div id="chat-canvas" class="chat-canvas">
+        <p class="chat-note">Mensagem <strong>individual</strong> para cada número, em lotes de cinco. Tique = servidor aceitou, não é confirmação de leitura. <strong>Respostas não chegam aqui</strong>, e sair da página durante o disparo interrompe os lotes restantes.</p>
+        ${bolha}
+      </div>
+
+      <footer class="chat-composer">
+        <div class="chat-composer-field">
+          <textarea id="broadcast-message" maxlength="4096" rows="1" placeholder="Escreva o comunicado…" aria-label="Texto do comunicado">${esc(b.message)}</textarea>
+          <div class="chat-composer-hint">
+            <span>Ctrl + Enter envia · Enter quebra linha</span>
+            <span id="broadcast-counter">${count(b.message.length)} / 4.096</span>
+          </div>
+        </div>
+        <button id="broadcast-send" class="send-fab" data-send-broadcast ${enviavel ? "" : "disabled"} aria-label="Enviar comunicado" title="Enviar comunicado">
+          ${b.sending ? icon("loader", "icon spin") : icon("send")}
+        </button>
+      </footer>
+    </article>`;
   }
 
   function renderBroadcastProgress() {
     const b = state.broadcast;
-    const success = b.results.filter((item) => item.status === "sent").length;
-    const failed = b.results.filter((item) => item.status !== "sent").length;
+    const falhas = b.results.filter((item) => item.status !== "sent").length;
     const progress = pct(b.sent, b.total);
-    return `<div class="send-progress"><div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div><div class="progress-copy"><span>${count(b.sent)} de ${count(b.total)} processados</span><span>${progress}%</span></div>${b.results.length ? `<div class="notice ${failed ? "notice--warning" : "notice--info"}" style="margin:0.75rem 0 0">${icon(failed ? "alert" : "check-circle")}<span><strong>${count(success)}</strong> enviados com sucesso${failed ? ` · <strong>${count(failed)}</strong> falharam` : ""}.</span></div>` : ""}${failed ? `<button class="button button--secondary button--compact" data-download-broadcast-failures>${icon("download")} Baixar falhas</button>` : ""}</div>`;
+    return `<div class="chat-progress">
+      <div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div>
+      <div class="progress-copy"><span>${count(b.sent)} de ${count(b.total)} processados</span><span>${progress}%</span></div>
+      ${falhas ? `<button class="button button--secondary button--compact" style="margin-top:0.5rem" data-download-broadcast-failures>${icon("download")} Baixar falhas</button>` : ""}
+    </div>`;
+  }
+
+  /* A conversa acompanha o que chega, como em qualquer mensageiro. */
+  function stickChatToBottom() {
+    const canvas = $("chat-canvas");
+    if (canvas) canvas.scrollTop = canvas.scrollHeight;
+  }
+
+  /* O campo cresce com o texto até o teto definido no CSS. */
+  function growComposer(node) {
+    if (!node) return;
+    node.style.height = "auto";
+    node.style.height = `${node.scrollHeight}px`;
+  }
+
+  /* Atualizações cirúrgicas: redesenhar a página inteira tiraria o foco de
+     quem está escrevendo. */
+  function syncBroadcastComposer() {
+    const b = state.broadcast;
+    const recipients = selectedRecipients();
+    const texto = b.message.trim();
+    const preview = $("message-preview");
+    const previewText = $("message-preview-text");
+    if (previewText) previewText.textContent = texto || "O texto que você escrever aparece aqui, do jeito que chega no WhatsApp.";
+    if (preview) preview.classList.toggle("chat-bubble--vazia", !texto);
+    const previewMeta = $("message-preview-meta");
+    if (previewMeta) previewMeta.hidden = !texto;
+    const counter = $("broadcast-counter");
+    if (counter) counter.textContent = `${count(b.message.length)} / 4.096`;
+    const send = $("broadcast-send");
+    if (send) send.disabled = b.sending || !texto || !recipients.length || !whatsappConnected();
+  }
+
+  function syncBroadcastRecipients() {
+    const recipients = selectedRecipients();
+    const lotes = Math.ceil(recipients.length / 5);
+    const total = $("recipient-count");
+    if (total) total.textContent = count(recipients.length);
+    const lote = $("batch-count");
+    if (lote) lote.textContent = count(lotes);
+    const lista = $("recipient-list");
+    if (lista) lista.innerHTML = renderRecipientRows(state.broadcast.mode === "manual" ? recipients : broadcastFilter(recipients), recipients, state.broadcast.mode === "verified");
+    syncBroadcastComposer();
   }
 
   async function sendBroadcast() {
@@ -1452,7 +1641,9 @@
     if (!message || message.length > 4096 || !recipients.length || b.sending) return;
     if (!whatsappConnected()) return toast("WhatsApp desconectado", "error", "Confirme a conexão antes de iniciar o envio.");
     if (!await askConfirm({ title: `Enviar para ${count(recipients.length)} números?`, message: "O envio começa imediatamente e não pode ser desfeito. Os números serão processados em lotes de cinco.", label: "Iniciar envio", danger: true, extra: `<code>${esc(message.slice(0, 240))}${message.length > 240 ? "…" : ""}</code>` })) return;
-    b.sending = true; b.sent = 0; b.total = recipients.length; b.results = []; renderCurrentPage();
+    b.sending = true; b.sent = 0; b.total = recipients.length; b.results = [];
+    b.sentMessage = message; b.sentAt = Date.now();
+    renderCurrentPage();
     try {
       for (let offset = 0; offset < recipients.length; offset += 5) {
         const batch = recipients.slice(offset, offset + 5);
@@ -1464,6 +1655,7 @@
         if (offset + 5 < recipients.length) await new Promise((resolve) => setTimeout(resolve, 900));
       }
       const failed = b.results.filter((item) => item.status !== "sent").length;
+      b.message = "";
       toast(failed ? "Envio concluído com falhas" : "Comunicado enviado", failed ? "error" : "success", failed ? `${failed} números não receberam a mensagem.` : `${recipients.length} números processados.`);
     } catch (error) {
       toast("O envio foi interrompido", "error", error.message);
@@ -1495,6 +1687,10 @@
     if (els.app.hidden) return;
     const renderers = { overview: renderOverview, users: renderUsers, diagnostics: renderDiagnostics, traces: renderTraces, analytics: renderAnalytics, versions: renderVersions, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
     els.page.innerHTML = renderers[state.page]?.() || "";
+    if (state.page === "broadcast") {
+      growComposer($("broadcast-message"));
+      stickChatToBottom();
+    }
     if (state.page === "users") {
       if ($("user-license-filter")) $("user-license-filter").value = state.userFilter.license;
       if ($("user-activity-filter")) $("user-activity-filter").value = state.userFilter.activity;
@@ -1550,17 +1746,27 @@
     }
     if (event.target.id === "broadcast-message") {
       state.broadcast.message = event.target.value;
-      const preview = $("message-preview"); if (preview) preview.textContent = event.target.value.trim() || "Sua mensagem aparecerá aqui.";
-      const counter = $("broadcast-counter"); if (counter) counter.textContent = `${count(event.target.value.length)} / 4.096`;
-      const send = $("broadcast-send"); if (send) send.disabled = !event.target.value.trim() || !selectedRecipients().length || !whatsappConnected();
+      growComposer(event.target);
+      syncBroadcastComposer();
+      stickChatToBottom();
     }
     if (event.target.id === "broadcast-manual") {
       state.broadcast.manual = event.target.value;
-      const recipients = manualRecipients();
-      if ($("recipient-count")) $("recipient-count").textContent = count(recipients.length);
-      if ($("preview-recipient-count")) $("preview-recipient-count").textContent = count(recipients.length);
-      if ($("preview-batch-count")) $("preview-batch-count").textContent = count(Math.ceil(recipients.length / 5));
-      if ($("broadcast-send")) $("broadcast-send").disabled = !state.broadcast.message.trim() || !recipients.length || !whatsappConnected();
+      syncBroadcastRecipients();
+    }
+    if (event.target.id === "broadcast-search") {
+      state.broadcast.search = event.target.value;
+      const lista = $("recipient-list");
+      const recipients = selectedRecipients();
+      if (lista) lista.innerHTML = renderRecipientRows(broadcastFilter(recipients), recipients, true);
+    }
+  });
+
+  els.page.addEventListener("keydown", (event) => {
+    if (event.target.id !== "broadcast-message") return;
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      if (!$("broadcast-send")?.disabled) sendBroadcast();
     }
   });
 
