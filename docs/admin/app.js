@@ -51,7 +51,7 @@
     detail: null,
     detailTab: "summary",
     detailData: new Map(),
-    broadcast: { mode: "verified", manual: "", message: "", search: "", sentMessage: "", sentAt: 0, recipients: null, sending: false, sent: 0, total: 0, results: [] },
+    broadcast: { mode: "base", manual: "", message: "", search: "", segment: "all", includeInternal: false, selected: null, lists: [], sentMessage: "", sentAt: 0, recipients: null, sending: false, sent: 0, total: 0, results: [] },
     timers: { clock: null, health: null, whatsapp: null }
   };
 
@@ -562,8 +562,13 @@
       if (!state.verification && !state.loading.verification) loadVerification();
     }
     if (page === "broadcast") {
+      state.broadcast.lists = savedLists();
       if (!state.broadcast.recipients && !state.loading.recipients) loadRecipients();
       if (!state.whatsapp && !state.loading.whatsapp) loadWhatsapp({ quiet: true });
+      /* Contas dão licença, atividade e programa de testes; o resumo de versões
+         é o que sustenta o segmento de app desatualizado. */
+      if (!state.devices && !state.loading.devices) loadDevices({ quiet: true });
+      if (!state.versions && !state.loading.versions) loadVersions({ quiet: true });
     }
   }
 
@@ -1415,11 +1420,9 @@
     return [...new Set(values)];
   }
 
-  function selectedRecipients() {
-    return state.broadcast.mode === "verified" ? (state.broadcast.recipients || []) : manualRecipients();
-  }
-
   function onlyDigits(value) { return String(value ?? "").replace(/\D/g, ""); }
+
+  function plural(n, singular, plural_) { return `${count(n)} ${asNumber(n) === 1 ? singular : plural_}`; }
 
   /* O DDD serve de "inicial" do número na lista, como as iniciais do nome
      fazem nas outras telas. */
@@ -1453,12 +1456,6 @@
     return { key: "draft", label: "Vai receber este comunicado", iconName: "", tone: "" };
   }
 
-  function broadcastFilter(recipients) {
-    const query = onlyDigits(state.broadcast.search);
-    if (!state.broadcast.search.trim()) return recipients;
-    return query ? recipients.filter((phone) => onlyDigits(phone).includes(query)) : [];
-  }
-
   function renderBroadcast() {
     const b = state.broadcast;
     const recipients = selectedRecipients();
@@ -1468,23 +1465,212 @@
       "Funciona como um mensageiro: escolha quem recebe na lista, escreva no campo embaixo e dispare. Cada pessoa recebe uma mensagem individual, não um grupo."
     );
     const aviso = connected ? "" : `<div class="notice notice--warning">${icon("alert")}<span><strong>WhatsApp não confirmado como operacional.</strong> Verifique a conexão antes de enviar qualquer comunicado. <button class="text-button" data-nav="whatsapp" style="margin-left:0.3125rem">Abrir WhatsApp</button></span></div>`;
-    return header + aviso + `<section class="chat-shell">${renderBroadcastSide(recipients)}${renderBroadcastChat(recipients, connected)}</section>`;
+    return header + aviso + renderBroadcastToolbar() + `<section class="chat-shell">${renderBroadcastSide(recipients)}${renderBroadcastChat(recipients, connected)}</section>`;
+  }
+
+  /* Seleção de destinatários --------------------------------------------
+     A lista de números verificados vem da Edge Function e continua sendo o
+     limite do que dá para alcançar. O que muda aqui é o cruzamento: cada
+     número ganha a conta correspondente, e com ela licença, atividade,
+     programa de testes e versão instalada — que é o que permite segmentar. */
+  const BROADCAST_LISTS_KEY = "gain_admin_broadcast_lists_v1";
+
+  const SEGMENTS = [
+    ["all", "Todos os verificados"],
+    ["tester", "Testadores"],
+    ["expiring", "Licença vence em até 7 dias"],
+    ["expired", "Sem acesso ativo"],
+    ["active", "Licença em dia"],
+    ["lifetime", "Licença vitalícia"],
+    ["outdated", "App desatualizado"],
+    ["inactive", "Sem atividade há 30 dias"]
+  ];
+
+  /* Contas atrasadas, quando o resumo de versões já foi carregado. Sem ele o
+     segmento fica indisponível em vez de devolver uma lista vazia mentirosa. */
+  function outdatedUserIds() {
+    if (!state.versions) return null;
+    const ids = new Set();
+    versionOverview().outdated.forEach((item) => { if (item.user_id) ids.add(item.user_id); });
+    return ids;
+  }
+
+  function broadcastCandidates() {
+    const contas = new Map();
+    state.accounts.forEach((account) => {
+      const digits = onlyDigits(account.phone);
+      if (digits && !contas.has(digits)) contas.set(digits, account);
+    });
+    return [...new Set((state.broadcast.recipients || []).map(onlyDigits))]
+      .filter(Boolean)
+      .map((phone) => ({ phone, account: contas.get(phone) || null }));
+  }
+
+  function matchesSegment(candidate, segment, atrasados) {
+    const account = candidate.account;
+    if (segment === "all") return true;
+    if (!account) return false;
+    const license = licenseState(account.expiry, account.lifetime);
+    const idade = account.lastSeen ? (state.serverNow || state.now) - account.lastSeen : Infinity;
+    if (segment === "tester") return account.isTester;
+    if (segment === "expiring") return license.key === "expiring";
+    if (segment === "expired") return ["expired", "none"].includes(license.key);
+    if (segment === "active") return license.key === "active";
+    if (segment === "lifetime") return license.key === "lifetime";
+    if (segment === "outdated") return Boolean(atrasados && account.userId && atrasados.has(account.userId));
+    if (segment === "inactive") return idade > 30 * DAY_MS;
+    return true;
+  }
+
+  /* O segmento define o público; a busca só ajuda a achar alguém dentro dele. */
+  function segmentCandidates() {
+    const b = state.broadcast;
+    const atrasados = outdatedUserIds();
+    return broadcastCandidates().filter((candidate) => {
+      if (!b.includeInternal && candidate.account?.isInternal) return false;
+      return matchesSegment(candidate, b.segment, atrasados);
+    });
+  }
+
+  function visibleCandidates() {
+    const query = state.broadcast.search.trim().toLocaleLowerCase("pt-BR");
+    const lista = segmentCandidates();
+    if (!query) return lista;
+    const digits = onlyDigits(query);
+    return lista.filter(({ phone, account }) => {
+      if (digits && phone.includes(digits)) return true;
+      const texto = [account?.name, account?.email].filter(Boolean).join(" ").toLocaleLowerCase("pt-BR");
+      return texto.includes(query);
+    });
+  }
+
+  /* Trocar de segmento redefine o público — é essa a intenção de escolher um. */
+  function selectSegment(segment) {
+    state.broadcast.segment = segment;
+    state.broadcast.selected = new Set(segmentCandidates().map((c) => c.phone));
+  }
+
+  function ensureSelection() {
+    const b = state.broadcast;
+    /* Antes da lista de verificados chegar não há o que memorizar: fixar um
+       conjunto vazio agora deixaria a seleção presa em zero para sempre. */
+    if (!b.selected && (b.recipients || []).length) b.selected = new Set(segmentCandidates().map((c) => c.phone));
+    return b.selected || new Set();
+  }
+
+  function selectedRecipients() {
+    if (state.broadcast.mode === "manual") return manualRecipients();
+    const validos = new Set(broadcastCandidates().map((c) => c.phone));
+    return [...ensureSelection()].filter((phone) => validos.has(phone));
+  }
+
+  /* Listas salvas: ficam neste navegador, porque o servidor não guarda
+     campanhas nem públicos. A tela diz isso em voz alta. */
+  function savedLists() {
+    try {
+      const bruto = JSON.parse(localStorage.getItem(BROADCAST_LISTS_KEY) || "[]");
+      return Array.isArray(bruto) ? bruto.filter((item) => item && item.name && Array.isArray(item.phones)) : [];
+    } catch { return []; }
+  }
+
+  function storeLists(lists) {
+    try {
+      localStorage.setItem(BROADCAST_LISTS_KEY, JSON.stringify(lists.slice(0, 40)));
+      return true;
+    } catch {
+      toast("Não foi possível salvar a lista", "error", "O navegador bloqueou o armazenamento local.");
+      return false;
+    }
+  }
+
+  async function saveCurrentList() {
+    const phones = selectedRecipients();
+    if (!phones.length) return toast("Nada para salvar", "error", "Selecione ao menos um destinatário.");
+    const nome = await askText({
+      title: "Salvar lista personalizada",
+      message: `Guarda os ${count(phones.length)} destinatários selecionados agora, para reutilizar depois.`,
+      placeholder: "Ex.: testadores ativos",
+      label: "Salvar lista"
+    });
+    if (!nome) return;
+    const lists = savedLists().filter((item) => item.name !== nome);
+    lists.unshift({ name: nome, phones, savedAt: Date.now() });
+    if (storeLists(lists)) {
+      state.broadcast.lists = lists;
+      toast("Lista salva", "success", `${nome} · ${plural(phones.length, "número guardado", "números guardados")} neste navegador.`);
+      renderCurrentPage();
+    }
+  }
+
+  function applyList(name) {
+    const lista = savedLists().find((item) => item.name === name);
+    if (!lista) return;
+    const validos = new Set(broadcastCandidates().map((c) => c.phone));
+    const presentes = lista.phones.map(onlyDigits).filter((phone) => validos.has(phone));
+    const perdidos = lista.phones.length - presentes.length;
+    state.broadcast.mode = "base";
+    state.broadcast.segment = "all";
+    state.broadcast.search = "";
+    state.broadcast.selected = new Set(presentes);
+    renderCurrentPage();
+    toast(`Lista "${name}" aplicada`, perdidos ? "error" : "success",
+      perdidos ? `${plural(perdidos, "número não está mais verificado", "números não estão mais verificados")} e ficaram de fora.` : `${plural(presentes.length, "destinatário selecionado", "destinatários selecionados")}.`);
+  }
+
+  async function deleteList(name) {
+    if (!await askConfirm({ title: `Apagar a lista "${name}"?`, message: "Ela some deste navegador. Os destinatários continuam existindo.", label: "Apagar", danger: true })) return;
+    const lists = savedLists().filter((item) => item.name !== name);
+    if (storeLists(lists)) { state.broadcast.lists = lists; renderCurrentPage(); }
+  }
+
+  /* Os filtros moram numa barra horizontal acima dos dois painéis. Dentro da
+     coluna estreita eles comiam a altura da lista — que é justamente o que a
+     tela precisa mostrar: quem vai receber. */
+  function renderBroadcastToolbar() {
+    const b = state.broadcast;
+    const manual = b.mode === "manual";
+    const semVersoes = !state.versions;
+    const podeS = !manual && selectedRecipients().length > 0;
+
+    const listas = b.lists.length
+      ? `<div class="saved-lists">${b.lists.map((item) => `<span class="saved-list">
+          <button data-load-list="${esc(item.name)}" title="Aplicar esta lista">${esc(item.name)} <small>${count(item.phones.length)}</small></button>
+          <button class="saved-list-x" data-delete-list="${esc(item.name)}" aria-label="Apagar lista ${esc(item.name)}">${icon("x")}</button>
+        </span>`).join("")}</div>`
+      : "";
+
+    const filtros = manual
+      ? `<p class="section-copy">Cole os números na coluna ao lado. Só os válidos entram na conta.</p>`
+      : `<select id="broadcast-segment" class="toolbar-select" aria-label="Segmento de destinatários">
+          ${SEGMENTS.map(([value, label]) => `<option value="${value}"${b.segment === value ? " selected" : ""}${value === "outdated" && semVersoes ? " disabled" : ""}>${esc(label)}${value === "outdated" && semVersoes ? " (indisponível)" : ""}</option>`).join("")}
+        </select>
+        <label class="search-field">${icon("search")}<input id="broadcast-search" type="search" value="${esc(b.search)}" placeholder="Achar por nome, e-mail ou número…" aria-label="Procurar destinatário"></label>
+        <button class="filter-chip" data-toggle-internal aria-pressed="${b.includeInternal}">Incluir contas internas</button>`;
+
+    return `<section class="broadcast-toolbar">
+      <div class="mode-toggle">
+        <button data-broadcast-mode="base" aria-pressed="${!manual}">Da base</button>
+        <button data-broadcast-mode="manual" aria-pressed="${manual}">Lista manual</button>
+      </div>
+      ${filtros}
+      ${listas}
+      ${manual ? "" : `<button class="button button--secondary button--compact" data-save-list ${podeS ? "" : "disabled"} title="Guardar esta seleção como uma lista reutilizável">${icon("bookmark")} Salvar lista</button>`}
+    </section>`;
   }
 
   function renderBroadcastSide(recipients) {
     const b = state.broadcast;
     const manual = b.mode === "manual";
-    const visiveis = manual ? recipients : broadcastFilter(recipients);
     const carregando = state.loading.recipients && !manual;
-    const lotes = Math.ceil(recipients.length / 5);
 
-    const head = `<div class="chat-side-head">
-      <h3 class="section-title">Quem recebe</h3>
-      <div class="mode-toggle">
-        <button data-broadcast-mode="verified" aria-pressed="${!manual}">Verificados</button>
-        <button data-broadcast-mode="manual" aria-pressed="${manual}">Lista manual</button>
-      </div>
-    </div>`;
+    const head = manual
+      ? `<div class="chat-side-head"><h3 class="section-title">Quem recebe</h3></div>`
+      : `<div class="chat-side-head chat-side-head--bulk">
+          <h3 class="section-title">Quem recebe</h3>
+          <span class="chat-side-bulk"><span id="bulk-summary">${broadcastBulkLabel()}</span>
+            <span><button class="text-button" data-select-all>Todos</button><button class="text-button" data-select-none>Nenhum</button></span>
+          </span>
+        </div>`;
 
     const corpo = manual
       ? `<div class="chat-side-compose">
@@ -1492,37 +1678,66 @@
           <textarea id="broadcast-manual" placeholder="5511999999999&#10;5511888888888">${esc(b.manual)}</textarea>
           <p class="section-copy" style="margin:0.5rem 0 0.75rem">Espaços e pontuação são ignorados. Repetidos contam uma vez só.</p>
         </div>
-        <div id="recipient-list" class="chat-side-list">${renderRecipientRows(visiveis, recipients, false)}</div>`
-      : `<div class="chat-side-search"><label class="search-field">${icon("search")}<input id="broadcast-search" type="search" value="${esc(b.search)}" placeholder="Procurar um número…" aria-label="Procurar destinatário"></label></div>
-        <div id="recipient-list" class="chat-side-list">${carregando ? loadingState("Consultando quem está verificado…") : renderRecipientRows(visiveis, recipients, true)}</div>`;
+        <div id="recipient-list" class="chat-side-list">${renderManualRows(manualRecipients())}</div>`
+      : `<div id="recipient-list" class="chat-side-list">${carregando ? loadingState("Consultando quem está verificado…") : renderCandidateRows(visibleCandidates(), segmentCandidates())}</div>`;
 
     const erro = state.errors.recipients && !manual
       ? `<div class="notice notice--danger" style="margin:0 0.9375rem 0.75rem">${icon("alert")}<span>${esc(state.errors.recipients)}</span></div>`
       : "";
 
+    const lotes = Math.ceil(recipients.length / 5);
     return `<aside class="chat-side">${head}${corpo}${erro}<div class="chat-side-foot">
       <span><strong id="recipient-count">${count(recipients.length)}</strong><small id="recipient-label">${recipients.length === 1 ? "destinatário" : "destinatários"} · <span id="batch-count">${count(lotes)}</span> ${lotes === 1 ? "lote" : "lotes"} de até 5</small></span>
-      ${manual ? "" : `<button class="button button--secondary button--compact" data-refresh-resource="recipients" aria-label="Atualizar lista">${icon("refresh")}</button>`}
+      ${manual ? "" : `<button class="button button--secondary button--compact" data-refresh-resource="recipients" title="Atualizar a lista de verificados">${icon("refresh")}</button>`}
     </div></aside>`;
   }
 
-  function renderRecipientRows(visiveis, todos, verificado) {
-    if (!todos.length) {
-      return `<p class="chat-side-empty">${verificado
-        ? "Nenhum número concluiu a verificação por WhatsApp ainda."
-        : "Escreva os números acima. Eles aparecem aqui conforme ficam válidos."}</p>`;
-    }
-    if (!visiveis.length) return `<p class="chat-side-empty">Nenhum número corresponde à busca. O envio continua indo para os ${count(todos.length)} da lista.</p>`;
-    const filtrando = visiveis.length !== todos.length;
-    const aviso = filtrando ? `<p class="chat-side-empty" style="padding:0.25rem 0.5rem 0.625rem">Mostrando ${count(visiveis.length)} de ${count(todos.length)} — o envio vai para todos.</p>` : "";
-    return aviso + visiveis.slice(0, 300).map((phone) => {
+  function renderManualRows(phones) {
+    if (!phones.length) return `<p class="chat-side-empty">Escreva os números acima. Eles aparecem aqui conforme ficam válidos.</p>`;
+    return phones.map((phone) => {
       const entrega = deliveryFor(phone);
-      return `<div class="recipient-row">
+      return `<div class="recipient-row is-static">
         <span class="avatar">${esc(phoneDdd(phone))}</span>
         <span class="recipient-copy"><strong>${esc(phoneLabel(phone))}</strong><small>${esc(entrega.label)}</small></span>
         ${entrega.iconName ? icon(entrega.iconName, `icon ${entrega.tone}`) : ""}
       </div>`;
-    }).join("") + (visiveis.length > 300 ? `<p class="chat-side-empty">…e mais ${count(visiveis.length - 300)}. A lista mostra os 300 primeiros; o envio usa todos.</p>` : "");
+    }).join("");
+  }
+
+  function broadcastBulkLabel() {
+    const selecionados = ensureSelection();
+    const noSegmento = segmentCandidates();
+    const visiveis = visibleCandidates();
+    const extra = visiveis.length !== noSegmento.length ? ` · mostrando ${count(visiveis.length)}` : "";
+    return `${count(selecionados.size)} de ${count(noSegmento.length)} selecionados${extra}`;
+  }
+
+  function renderCandidateRows(visiveis, noSegmento) {
+    const b = state.broadcast;
+    const selecionados = ensureSelection();
+    if (!noSegmento.length) {
+      return `<p class="chat-side-empty">${b.segment === "all"
+        ? "Nenhum número concluiu a verificação por WhatsApp ainda."
+        : "Nenhum número verificado se encaixa neste segmento."}</p>`;
+    }
+    if (!visiveis.length) return `<p class="chat-side-empty">Nenhum resultado para a busca. A seleção continua com ${count(selecionados.size)} destinatários.</p>`;
+    return visiveis.slice(0, 300).map(({ phone, account }) => {
+      const entrega = deliveryFor(phone);
+      const marcado = selecionados.has(phone);
+      const license = account ? licenseState(account.expiry, account.lifetime) : null;
+      const titulo = account?.name || account?.email || "Sem conta vinculada";
+      const apoio = b.results.length || b.sending
+        ? entrega.label
+        : `${phoneLabel(phone)}${account?.lastSeen ? ` · ${relative(account.lastSeen).toLowerCase()}` : ""}`;
+      return `<label class="recipient-row${marcado ? " is-picked" : ""}">
+        <input type="checkbox" data-phone="${esc(phone)}"${marcado ? " checked" : ""}${b.sending ? " disabled" : ""} aria-label="Incluir ${esc(phoneLabel(phone))}">
+        <span class="avatar">${esc(account ? initials(account.name, account.email) : phoneDdd(phone))}</span>
+        <span class="recipient-copy"><strong>${esc(titulo)}</strong><small>${esc(apoio)}</small></span>
+        ${entrega.iconName
+          ? icon(entrega.iconName, `icon ${entrega.tone}`)
+          : (license ? `<span class="status-pill pill-${license.tone}">${esc(license.label)}</span>` : `<span class="tag">sem conta</span>`)}
+      </label>`;
+    }).join("") + (visiveis.length > 300 ? `<p class="chat-side-empty">…e mais ${count(visiveis.length - 300)}. A lista mostra 300 por vez; a seleção continua valendo por inteiro.</p>` : "");
   }
 
   function renderBroadcastChat(recipients, connected) {
@@ -1555,9 +1770,9 @@
         <span class="chat-top-avatar">${icon("users")}</span>
         <span class="chat-top-copy">
           <strong>${count(recipients.length)} ${recipients.length === 1 ? "destinatário" : "destinatários"}</strong>
-          <small>${b.mode === "verified" ? "Números verificados" : "Lista manual"} · WhatsApp${connected ? "" : " · desconectado"}</small>
+          <small>${b.mode === "manual" ? "Lista manual" : esc((SEGMENTS.find(([v]) => v === b.segment) || [, "Verificados"])[1])} · WhatsApp${connected ? "" : " · desconectado"}</small>
         </span>
-        ${b.results.length ? pill(falhas ? `${count(enviados)} enviados · ${count(falhas)} falharam` : `${count(enviados)} enviados`, falhas ? "yellow" : "green") : ""}
+        ${b.results.length ? pill(falhas ? `${plural(enviados, "enviado", "enviados")} · ${plural(falhas, "falhou", "falharam")}` : plural(enviados, "enviado", "enviados"), falhas ? "yellow" : "green") : ""}
       </header>
 
       <div id="chat-canvas" class="chat-canvas">
@@ -1630,7 +1845,11 @@
     const lote = $("batch-count");
     if (lote) lote.textContent = count(lotes);
     const lista = $("recipient-list");
-    if (lista) lista.innerHTML = renderRecipientRows(state.broadcast.mode === "manual" ? recipients : broadcastFilter(recipients), recipients, state.broadcast.mode === "verified");
+    if (lista && state.broadcast.mode === "manual") lista.innerHTML = renderManualRows(recipients);
+    const resumo = $("bulk-summary");
+    if (resumo) resumo.textContent = broadcastBulkLabel();
+    const salvar = document.querySelector("[data-save-list]");
+    if (salvar) salvar.disabled = !recipients.length;
     syncBroadcastComposer();
   }
 
@@ -1640,7 +1859,7 @@
     const message = b.message.trim();
     if (!message || message.length > 4096 || !recipients.length || b.sending) return;
     if (!whatsappConnected()) return toast("WhatsApp desconectado", "error", "Confirme a conexão antes de iniciar o envio.");
-    if (!await askConfirm({ title: `Enviar para ${count(recipients.length)} números?`, message: "O envio começa imediatamente e não pode ser desfeito. Os números serão processados em lotes de cinco.", label: "Iniciar envio", danger: true, extra: `<code>${esc(message.slice(0, 240))}${message.length > 240 ? "…" : ""}</code>` })) return;
+    if (!await askConfirm({ title: `Enviar para ${plural(recipients.length, "número", "números")}?`, message: "O envio começa imediatamente e não pode ser desfeito. Os números serão processados em lotes de cinco.", label: "Iniciar envio", danger: true, extra: `<code>${esc(message.slice(0, 240))}${message.length > 240 ? "…" : ""}</code>` })) return;
     b.sending = true; b.sent = 0; b.total = recipients.length; b.results = [];
     b.sentMessage = message; b.sentAt = Date.now();
     renderCurrentPage();
@@ -1656,7 +1875,7 @@
       }
       const failed = b.results.filter((item) => item.status !== "sent").length;
       b.message = "";
-      toast(failed ? "Envio concluído com falhas" : "Comunicado enviado", failed ? "error" : "success", failed ? `${failed} números não receberam a mensagem.` : `${recipients.length} números processados.`);
+      toast(failed ? "Envio concluído com falhas" : "Comunicado enviado", failed ? "error" : "success", failed ? `${plural(failed, "número não recebeu", "números não receberam")} a mensagem.` : `${plural(recipients.length, "número processado", "números processados")}.`);
     } catch (error) {
       toast("O envio foi interrompido", "error", error.message);
     } finally {
@@ -1678,6 +1897,33 @@
     els.confirm.showModal();
     return new Promise((resolve) => {
       const onClose = () => { els.confirm.removeEventListener("close", onClose); resolve(els.confirm.returnValue === "confirm"); };
+      els.confirm.addEventListener("close", onClose);
+    });
+  }
+
+  function askText({ title, message, label = "Salvar", placeholder = "", value = "" }) {
+    $("confirm-title").textContent = title;
+    $("confirm-message").textContent = message;
+    $("confirm-extra").innerHTML = `<input id="confirm-text" type="text" maxlength="40" placeholder="${esc(placeholder)}" value="${esc(value)}" style="margin-top:0.75rem">`;
+    const action = $("confirm-action");
+    action.textContent = label;
+    action.className = "button button--primary";
+    $("confirm-icon").style.background = "var(--green-soft)";
+    $("confirm-icon").style.color = "var(--green)";
+    els.confirm.returnValue = "cancel";
+    els.confirm.showModal();
+    const input = $("confirm-text");
+    input.focus();
+    /* Enter dentro do campo confirma; sem isto ele acionaria o primeiro botão
+       do formulário, que é o Cancelar. */
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); action.click(); }
+    });
+    return new Promise((resolve) => {
+      const onClose = () => {
+        els.confirm.removeEventListener("close", onClose);
+        resolve(els.confirm.returnValue === "confirm" ? input.value.trim() : "");
+      };
       els.confirm.addEventListener("close", onClose);
     });
   }
@@ -1721,6 +1967,16 @@
     if (target.dataset.openTrace) return openTrace(target.dataset.openTrace);
     if (target.dataset.whatsappAction) return whatsappAction(target.dataset.whatsappAction);
     if (target.dataset.broadcastMode) { state.broadcast.mode = target.dataset.broadcastMode; return renderCurrentPage(); }
+    if (target.hasAttribute("data-toggle-internal")) {
+      state.broadcast.includeInternal = !state.broadcast.includeInternal;
+      selectSegment(state.broadcast.segment);
+      return renderCurrentPage();
+    }
+    if (target.hasAttribute("data-select-all")) { selectSegment(state.broadcast.segment); return renderCurrentPage(); }
+    if (target.hasAttribute("data-select-none")) { state.broadcast.selected = new Set(); return renderCurrentPage(); }
+    if (target.hasAttribute("data-save-list")) return saveCurrentList();
+    if (target.dataset.loadList) return applyList(target.dataset.loadList);
+    if (target.dataset.deleteList) return deleteList(target.dataset.deleteList);
     if (target.hasAttribute("data-send-broadcast")) return sendBroadcast();
     if (target.dataset.refreshResource) return retryResource(target.dataset.refreshResource);
     if (target.hasAttribute("data-download-broadcast-failures")) {
@@ -1757,8 +2013,7 @@
     if (event.target.id === "broadcast-search") {
       state.broadcast.search = event.target.value;
       const lista = $("recipient-list");
-      const recipients = selectedRecipients();
-      if (lista) lista.innerHTML = renderRecipientRows(broadcastFilter(recipients), recipients, true);
+      if (lista) lista.innerHTML = renderCandidateRows(visibleCandidates(), segmentCandidates());
     }
   });
 
@@ -1771,6 +2026,13 @@
   });
 
   els.page.addEventListener("change", (event) => {
+    if (event.target.id === "broadcast-segment") { selectSegment(event.target.value); return renderCurrentPage(); }
+    if (event.target.matches("input[type=checkbox][data-phone]")) {
+      const selecionados = ensureSelection();
+      event.target.checked ? selecionados.add(event.target.dataset.phone) : selecionados.delete(event.target.dataset.phone);
+      event.target.closest(".recipient-row")?.classList.toggle("is-picked", event.target.checked);
+      return syncBroadcastRecipients();
+    }
     if (event.target.id === "user-license-filter") { state.userFilter.license = event.target.value; $("users-results").innerHTML = renderUserResults(); }
     if (event.target.id === "user-activity-filter") { state.userFilter.activity = event.target.value; $("users-results").innerHTML = renderUserResults(); }
     if (event.target.id === "user-sort") { state.userFilter.sort = event.target.value; $("users-results").innerHTML = renderUserResults(); }
