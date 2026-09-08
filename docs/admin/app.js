@@ -1396,7 +1396,21 @@
     const period = data.last7d || {};
     const successRate = pct(period.success, period.total);
     const daily = data.daily || [];
-    return `<div class="panel-head"><div><h3 class="section-title">Verificações de telefone</h3><p class="section-copy">Tentativas e desfechos dos últimos 7 dias</p></div></div><div class="metric-grid">${metricCard("Tentativas · 7 dias", count(period.total), `${count(data.last24h?.total)} nas últimas 24h`, "blue", "phone")}${metricCard("Concluídas", count(period.success), `${successRate}% de sucesso`, "green", "check-circle")}${metricCard("Expiradas", count(period.expired), "Código não utilizado", period.expired ? "yellow" : "blue", "clock")}${metricCard("Pendentes", count(period.pending), "Ainda dentro do prazo", "purple", "activity")}</div><section class="content-grid"><article class="panel"><div class="panel-head"><div><h3 class="section-title">Volume diário</h3><p class="section-copy">Tentativas nos últimos 7 dias</p></div></div>${daily.length ? miniColumns(daily.map((item) => item.total), daily.map((item) => new Date(`${item.date}T12:00:00`).toLocaleDateString("pt-BR", { weekday: "short" })), "var(--blue)") : '<div class="notice"><span>Sem série diária disponível.</span></div>'}</article><article class="panel"><div class="panel-head"><div><h3 class="section-title">Tentativas recentes</h3><p class="section-copy">Uma linha por número, com máscara de privacidade</p></div></div><div class="activity-list">${(data.recent || []).slice(0, 8).map((item) => { const outcome = item.outcome || (item.used_at ? "success" : new Date(item.expires_at) < new Date() ? "expired" : "pending"); const status = outcome === "success" ? ["Concluída", "green"] : outcome === "expired" ? ["Expirada", "yellow"] : ["Pendente", "purple"]; return `<div class="activity-item"><span class="activity-icon">${icon("phone")}</span><span class="activity-copy"><strong>${esc(item.phone_masked || "Número protegido")}</strong><small>${item.created_at ? new Date(item.created_at).toLocaleString("pt-BR") : "—"}</small></span>${pill(status[0], status[1])}</div>`; }).join("") || '<div class="notice"><span>Sem tentativas recentes.</span></div>'}</div></article></section>`;
+    /* Falhas de envio: uma queda do provedor não vira tentativa registrada,
+       porque a linha do código só nasce depois do envio dar certo. Sem este
+       bloco, a queda fica invisível aqui até um usuário reclamar. */
+    const fail = data.failures || {};
+    const failFoot = fail.last7d ? `${count(fail.last24h)} nas últimas 24h` : "Nenhuma falha registrada";
+    const motivoDaFalha = {
+      whatsapp_disconnected: "WhatsApp desconectado",
+      instance_missing: "Instância ausente",
+      provider_error: "Erro do provedor"
+    };
+    const failRows = (fail.recent || []).slice(0, 6).map((item) =>
+      `<div class="activity-item"><span class="activity-icon">${icon("alert")}</span><span class="activity-copy"><strong>${esc(item.phone_masked || "Número protegido")}</strong><small>${item.created_at ? new Date(item.created_at).toLocaleString("pt-BR") : "—"}</small></span>${pill(motivoDaFalha[item.reason] || item.reason || "Falha", "red")}</div>`
+    ).join("");
+    const ultimaRecuperacao = (data.recovery?.recent || [])[0];
+    return `<div class="panel-head"><div><h3 class="section-title">Verificações de telefone</h3><p class="section-copy">Tentativas e desfechos dos últimos 7 dias</p></div></div><div class="metric-grid">${metricCard("Tentativas · 7 dias", count(period.total), `${count(data.last24h?.total)} nas últimas 24h`, "blue", "phone")}${metricCard("Concluídas", count(period.success), `${successRate}% de sucesso`, "green", "check-circle")}${metricCard("Expiradas", count(period.expired), "Código não utilizado", period.expired ? "yellow" : "blue", "clock")}${metricCard("Pendentes", count(period.pending), "Ainda dentro do prazo", "purple", "activity")}${metricCard("Falhas de envio", count(fail.last7d), failFoot, fail.last7d ? "red" : "blue", "alert")}</div><section class="content-grid"><article class="panel"><div class="panel-head"><div><h3 class="section-title">Volume diário</h3><p class="section-copy">Tentativas nos últimos 7 dias</p></div></div>${daily.length ? miniColumns(daily.map((item) => item.total), daily.map((item) => new Date(`${item.date}T12:00:00`).toLocaleDateString("pt-BR", { weekday: "short" })), "var(--blue)") : '<div class="notice"><span>Sem série diária disponível.</span></div>'}</article><article class="panel"><div class="panel-head"><div><h3 class="section-title">Tentativas recentes</h3><p class="section-copy">Uma linha por número, com máscara de privacidade</p></div></div><div class="activity-list">${(data.recent || []).slice(0, 8).map((item) => { const outcome = item.outcome || (item.used_at ? "success" : new Date(item.expires_at) < new Date() ? "expired" : "pending"); const status = outcome === "success" ? ["Concluída", "green"] : outcome === "expired" ? ["Expirada", "yellow"] : ["Pendente", "purple"]; return `<div class="activity-item"><span class="activity-icon">${icon("phone")}</span><span class="activity-copy"><strong>${esc(item.phone_masked || "Número protegido")}</strong><small>${item.created_at ? new Date(item.created_at).toLocaleString("pt-BR") : "—"}</small></span>${pill(status[0], status[1])}</div>`; }).join("") || '<div class="notice"><span>Sem tentativas recentes.</span></div>'}</div></article>${failRows ? `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Falhas de envio</h3><p class="section-copy">${ultimaRecuperacao ? `Última recuperação: ${esc(ultimaRecuperacao.action === "railway_redeploy" ? "reinício do container" : "reinício da instância")} em ${new Date(ultimaRecuperacao.created_at).toLocaleString("pt-BR")}` : "Quando o provedor não entregou o código"}</p></div>${pill(`${count(fail.last24h)} em 24h`, fail.last24h ? "red" : "green")}</div><div class="activity-list">${failRows}</div></article>` : ""}</section>`;
   }
 
   async function whatsappAction(action) {
@@ -1422,10 +1436,18 @@
       if (action === "admin_repair") {
         // O reparo devolve o laudo da sondagem, não o payload de status —
         // recarrega a tela em vez de sobrescrever o que está nela.
+        const redeploy = result.redeploy;
+        const detalhe = redeploy?.ok
+          ? "O container do Evolution está reiniciando. Tente de novo em cerca de um minuto."
+          : redeploy?.skipped === "cooldown"
+            ? "Um reinício do container foi disparado há pouco. Aguarde alguns minutos."
+            : redeploy?.skipped === "not_configured"
+              ? "Reinício automático do container não configurado."
+              : result.instance?.adopted ? `Instância em uso: ${result.instance.resolved}` : (result.probe?.error || "");
         toast(
-          result.healthy ? "Conexão restabelecida" : "Reparo tentado, socket ainda fechado",
-          result.healthy ? "success" : "error",
-          result.instance?.adopted ? `Instância em uso: ${result.instance.resolved}` : (result.probe?.error || "")
+          result.healthy ? "Conexão restabelecida" : redeploy?.ok ? "Reiniciando o container do Evolution" : "Reparo tentado, socket ainda fechado",
+          result.healthy || redeploy?.ok ? "success" : "error",
+          detalhe
         );
         await loadWhatsapp({ quiet: true });
         return;
