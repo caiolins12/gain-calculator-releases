@@ -51,7 +51,7 @@
     detail: null,
     detailTab: "summary",
     detailData: new Map(),
-    broadcast: { mode: "base", manual: "", message: "", search: "", segment: "all", includeInternal: false, selected: null, lists: [], sentMessage: "", sentAt: 0, recipients: null, sending: false, sent: 0, total: 0, results: [] },
+    broadcast: { mode: "base", manual: "", message: "", search: "", segment: "all", includeInternal: false, selected: null, lists: [], media: null, uploading: false, sentMessage: "", sentMedia: null, sentAt: 0, recipients: null, sending: false, sent: 0, total: 0, results: [] },
     timers: { clock: null, health: null, whatsapp: null }
   };
 
@@ -1468,6 +1468,98 @@
     return header + aviso + renderBroadcastToolbar() + `<section class="chat-shell">${renderBroadcastSide(recipients)}${renderBroadcastChat(recipients, connected)}</section>`;
   }
 
+  /* Anexos --------------------------------------------------------------
+     O arquivo sobe uma única vez para o bucket `broadcast-media` e o disparo
+     manda só a URL. Assim os mesmos bytes não são reenviados a cada lote de
+     cinco números, e a chamada continua pequena. */
+  const MEDIA_BUCKET = "broadcast-media";
+  const MEDIA_MAX_BYTES = 8 * 1024 * 1024;
+  const MEDIA_TYPES = {
+    "image/jpeg": "image", "image/png": "image", "image/webp": "image",
+    "application/pdf": "document"
+  };
+  /* Com anexo o texto vira legenda, e o WhatsApp corta legendas longas. */
+  const CAPTION_MAX = 1024;
+
+  function messageLimit() { return state.broadcast.media ? CAPTION_MAX : 4096; }
+
+  async function uploadBroadcastMedia(file) {
+    const b = state.broadcast;
+    const mediatype = MEDIA_TYPES[file.type];
+    if (!mediatype) return toast("Formato não aceito", "error", "Use JPG, PNG, WebP ou PDF.");
+    if (file.size > MEDIA_MAX_BYTES) return toast("Arquivo grande demais", "error", `O limite é ${bytes(MEDIA_MAX_BYTES)}.`);
+
+    b.uploading = true; renderCurrentPage();
+    try {
+      if (!state.session?.accessToken) throw new Error("Sessão administrativa ausente.");
+      if (state.session.expiresAt && state.session.expiresAt - Date.now() < 30_000 && state.session.refreshToken) {
+        await refreshSession();
+      }
+      const limpo = file.name.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9._-]/g, "-").slice(-60);
+      const caminho = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${limpo}`;
+      const response = await fetch(`${SUPABASE_URL}/storage/v1/object/${MEDIA_BUCKET}/${encodeURIComponent(caminho)}`, {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${state.session.accessToken}`,
+          "Content-Type": file.type,
+          "x-upsert": "false"
+        },
+        body: file
+      });
+      if (!response.ok) {
+        const detalhe = await response.json().catch(() => ({}));
+        throw new Error(detalhe.message || detalhe.error || `O servidor recusou o arquivo (${response.status}).`);
+      }
+      b.media = {
+        path: caminho,
+        url: `${SUPABASE_URL}/storage/v1/object/public/${MEDIA_BUCKET}/${encodeURIComponent(caminho)}`,
+        mimetype: file.type,
+        filename: file.name.slice(0, 120),
+        mediatype,
+        size: file.size
+      };
+      /* A legenda é mais curta que a mensagem solta. Nada é cortado por conta
+         própria: o envio fica bloqueado até o texto caber. */
+      if (b.message.length > CAPTION_MAX) {
+        toast("O texto não cabe na legenda", "error", `Com anexo cabem ${count(CAPTION_MAX)} caracteres; encurte para poder enviar.`);
+      }
+      toast("Anexo pronto", "success", file.name);
+    } catch (error) {
+      toast("Não foi possível anexar", "error", error.message);
+    } finally {
+      b.uploading = false;
+      renderCurrentPage();
+    }
+  }
+
+  async function removeBroadcastMedia() {
+    const media = state.broadcast.media;
+    state.broadcast.media = null;
+    renderCurrentPage();
+    if (!media?.path) return;
+    /* Melhor esforço: se a remoção falhar, o arquivo fica órfão no bucket, mas
+       não vai para ninguém — o disparo já não o referencia. */
+    try {
+      await fetch(`${SUPABASE_URL}/storage/v1/object/${MEDIA_BUCKET}/${encodeURIComponent(media.path)}`, {
+        method: "DELETE",
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${state.session?.accessToken}` }
+      });
+    } catch { /* silencioso de propósito */ }
+  }
+
+  function renderMediaChip(media, { removivel = false } = {}) {
+    if (!media) return "";
+    const imagem = media.mediatype === "image";
+    return `<div class="media-chip">
+      ${imagem
+        ? `<img class="media-thumb" src="${esc(media.url)}" alt="Prévia do anexo">`
+        : `<span class="media-thumb media-thumb--doc">${icon("package")}</span>`}
+      <span class="media-copy"><strong>${esc(media.filename)}</strong><small>${esc(bytes(media.size))} · ${imagem ? "imagem" : "documento"}</small></span>
+      ${removivel ? `<button class="icon-button" data-remove-media aria-label="Remover anexo">${icon("x")}</button>` : ""}
+    </div>`;
+  }
+
   /* Seleção de destinatários --------------------------------------------
      A lista de números verificados vem da Edge Function e continua sendo o
      limite do que dá para alcançar. O que muda aqui é o cruzamento: cada
@@ -1623,38 +1715,53 @@
     if (storeLists(lists)) { state.broadcast.lists = lists; renderCurrentPage(); }
   }
 
-  /* Os filtros moram numa barra horizontal acima dos dois painéis. Dentro da
-     coluna estreita eles comiam a altura da lista — que é justamente o que a
-     tela precisa mostrar: quem vai receber. */
+  /* A barra tem duas faixas com papéis distintos: em cima se define QUEM é o
+     público; embaixo, o que fazer com a seleção resultante. Misturar as duas
+     coisas numa linha só era o que deixava a tela difícil de ler. */
   function renderBroadcastToolbar() {
     const b = state.broadcast;
     const manual = b.mode === "manual";
     const semVersoes = !state.versions;
-    const podeS = !manual && selectedRecipients().length > 0;
 
-    const listas = b.lists.length
-      ? `<div class="saved-lists">${b.lists.map((item) => `<span class="saved-list">
-          <button data-load-list="${esc(item.name)}" title="Aplicar esta lista">${esc(item.name)} <small>${count(item.phones.length)}</small></button>
-          <button class="saved-list-x" data-delete-list="${esc(item.name)}" aria-label="Apagar lista ${esc(item.name)}">${icon("x")}</button>
-        </span>`).join("")}</div>`
-      : "";
+    const origem = `<div class="mode-toggle">
+      <button data-broadcast-mode="base" aria-pressed="${!manual}">Da base</button>
+      <button data-broadcast-mode="manual" aria-pressed="${manual}">Lista manual</button>
+    </div>`;
 
     const filtros = manual
-      ? `<p class="section-copy">Cole os números na coluna ao lado. Só os válidos entram na conta.</p>`
+      ? `<p class="toolbar-hint">Os números vão na coluna ao lado — só os válidos entram na conta.</p>`
       : `<select id="broadcast-segment" class="toolbar-select" aria-label="Segmento de destinatários">
           ${SEGMENTS.map(([value, label]) => `<option value="${value}"${b.segment === value ? " selected" : ""}${value === "outdated" && semVersoes ? " disabled" : ""}>${esc(label)}${value === "outdated" && semVersoes ? " (indisponível)" : ""}</option>`).join("")}
         </select>
         <label class="search-field">${icon("search")}<input id="broadcast-search" type="search" value="${esc(b.search)}" placeholder="Achar por nome, e-mail ou número…" aria-label="Procurar destinatário"></label>
-        <button class="filter-chip" data-toggle-internal aria-pressed="${b.includeInternal}">Incluir contas internas</button>`;
+        <button class="filter-chip" data-toggle-internal aria-pressed="${b.includeInternal}">Contas internas</button>`;
+
+    if (manual) {
+      return `<section class="broadcast-toolbar"><div class="toolbar-row">
+        <span class="toolbar-label">Público</span>${origem}${filtros}
+      </div></section>`;
+    }
+
+    const listas = b.lists.length
+      ? b.lists.map((item) => `<span class="saved-list">
+          <button data-load-list="${esc(item.name)}" title="Aplicar esta lista">${esc(item.name)} <small>${count(item.phones.length)}</small></button>
+          <button class="saved-list-x" data-delete-list="${esc(item.name)}" aria-label="Apagar a lista ${esc(item.name)}">${icon("x")}</button>
+        </span>`).join("")
+      : `<span class="toolbar-hint">Nenhuma lista salva ainda.</span>`;
 
     return `<section class="broadcast-toolbar">
-      <div class="mode-toggle">
-        <button data-broadcast-mode="base" aria-pressed="${!manual}">Da base</button>
-        <button data-broadcast-mode="manual" aria-pressed="${manual}">Lista manual</button>
+      <div class="toolbar-row">
+        <span class="toolbar-label">Público</span>${origem}${filtros}
       </div>
-      ${filtros}
-      ${listas}
-      ${manual ? "" : `<button class="button button--secondary button--compact" data-save-list ${podeS ? "" : "disabled"} title="Guardar esta seleção como uma lista reutilizável">${icon("bookmark")} Salvar lista</button>`}
+      <div class="toolbar-row">
+        <span class="toolbar-label">Seleção</span>
+        <button class="button button--secondary button--compact" data-select-all>${icon("check")} Marcar todos</button>
+        <button class="button button--secondary button--compact" data-select-none>${icon("x")} Desmarcar</button>
+        <span class="toolbar-divider" aria-hidden="true"></span>
+        <span class="toolbar-label">Listas</span>
+        ${listas}
+        <button class="button button--secondary button--compact" data-save-list ${selectedRecipients().length ? "" : "disabled"} title="Guardar esta seleção como uma lista reutilizável">${icon("bookmark")} Salvar seleção</button>
+      </div>
     </section>`;
   }
 
@@ -1663,14 +1770,10 @@
     const manual = b.mode === "manual";
     const carregando = state.loading.recipients && !manual;
 
-    const head = manual
-      ? `<div class="chat-side-head"><h3 class="section-title">Quem recebe</h3></div>`
-      : `<div class="chat-side-head chat-side-head--bulk">
-          <h3 class="section-title">Quem recebe</h3>
-          <span class="chat-side-bulk"><span id="bulk-summary">${broadcastBulkLabel()}</span>
-            <span><button class="text-button" data-select-all>Todos</button><button class="text-button" data-select-none>Nenhum</button></span>
-          </span>
-        </div>`;
+    const head = `<div class="chat-side-head">
+      <h3 class="section-title">Quem recebe</h3>
+      ${manual ? "" : `<span id="bulk-summary" class="chat-side-bulk">${broadcastBulkLabel()}</span>`}
+    </div>`;
 
     const corpo = manual
       ? `<div class="chat-side-compose">
@@ -1688,7 +1791,7 @@
     const lotes = Math.ceil(recipients.length / 5);
     return `<aside class="chat-side">${head}${corpo}${erro}<div class="chat-side-foot">
       <span><strong id="recipient-count">${count(recipients.length)}</strong><small id="recipient-label">${recipients.length === 1 ? "destinatário" : "destinatários"} · <span id="batch-count">${count(lotes)}</span> ${lotes === 1 ? "lote" : "lotes"} de até 5</small></span>
-      ${manual ? "" : `<button class="button button--secondary button--compact" data-refresh-resource="recipients" title="Atualizar a lista de verificados">${icon("refresh")}</button>`}
+      ${manual ? "" : `<button class="button button--secondary button--compact" data-refresh-resource="recipients">${icon("refresh")} Atualizar</button>`}
     </div></aside>`;
   }
 
@@ -1757,13 +1860,14 @@
 
     /* Duas bolhas, como em qualquer mensageiro: em cima o que já foi disparado,
        com o estado da entrega; embaixo o rascunho que ainda está no campo. */
-    const enviada = b.sentMessage
-      ? `<div class="chat-bubble">${esc(b.sentMessage)}<span class="bubble-meta">${esc(horaEnvio)} ${selo}</span></div>${b.sending || b.results.length ? renderBroadcastProgress() : ""}`
+    const enviada = (b.sentMessage || b.sentMedia)
+      ? `<div class="chat-bubble">${renderMediaChip(b.sentMedia)}${esc(b.sentMessage)}<span class="bubble-meta">${esc(horaEnvio)} ${selo}</span></div>${b.sending || b.results.length ? renderBroadcastProgress() : ""}`
       : "";
-    const rascunho = `<div id="message-preview" class="chat-bubble${texto ? "" : " chat-bubble--vazia"}"><span id="message-preview-text">${texto ? esc(b.message) : (b.sentMessage ? "Escreva outro comunicado para disparar de novo." : "O texto que você escrever aparece aqui, do jeito que chega no WhatsApp.")}</span><span id="message-preview-meta" class="bubble-meta"${texto ? "" : " hidden"}>${hora} ${icon("clock")}</span></div>`;
+    const vazio = !texto && !b.media;
+    const rascunho = `<div id="message-preview" class="chat-bubble${vazio ? " chat-bubble--vazia" : ""}">${renderMediaChip(b.media)}<span id="message-preview-text">${texto ? esc(b.message) : (vazio ? (b.sentMessage || b.sentMedia ? "Escreva outro comunicado para disparar de novo." : "O texto que você escrever aparece aqui, do jeito que chega no WhatsApp.") : "")}</span><span id="message-preview-meta" class="bubble-meta"${vazio ? " hidden" : ""}>${hora} ${icon("clock")}</span></div>`;
     const bolha = enviada + rascunho;
 
-    const enviavel = !b.sending && Boolean(texto) && recipients.length > 0 && connected;
+    const enviavel = !b.sending && !b.uploading && (Boolean(texto) || Boolean(b.media)) && texto.length <= messageLimit() && recipients.length > 0 && connected;
 
     return `<article class="chat-main">
       <header class="chat-top">
@@ -1781,16 +1885,23 @@
       </div>
 
       <footer class="chat-composer">
-        <div class="chat-composer-field">
-          <textarea id="broadcast-message" maxlength="4096" rows="1" placeholder="Escreva o comunicado…" aria-label="Texto do comunicado">${esc(b.message)}</textarea>
-          <div class="chat-composer-hint">
-            <span>Ctrl + Enter envia · Enter quebra linha</span>
-            <span id="broadcast-counter">${count(b.message.length)} / 4.096</span>
+        ${b.media ? `<div class="composer-attachment">${renderMediaChip(b.media, { removivel: true })}</div>` : ""}
+        <div class="composer-line">
+          <input id="broadcast-file" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden>
+          <button class="icon-button composer-attach" data-attach-media ${b.sending || b.uploading ? "disabled" : ""} aria-label="Anexar imagem ou PDF" title="Anexar imagem ou PDF (até 8 MB)">
+            ${b.uploading ? icon("loader", "icon spin") : icon("paperclip")}
+          </button>
+          <div class="chat-composer-field">
+            <textarea id="broadcast-message" maxlength="${messageLimit()}" rows="1" placeholder="${b.media ? "Escreva a legenda (opcional)…" : "Escreva o comunicado…"}" aria-label="Texto do comunicado">${esc(b.message)}</textarea>
+            <div class="chat-composer-hint">
+              <span>Ctrl + Enter envia · Enter quebra linha${b.media ? " · com anexo o texto vira legenda" : ""}</span>
+              <span id="broadcast-counter">${count(b.message.length)} / ${count(messageLimit())}</span>
+            </div>
           </div>
+          <button id="broadcast-send" class="send-fab" data-send-broadcast ${enviavel ? "" : "disabled"} aria-label="Enviar comunicado" title="Enviar comunicado">
+            ${b.sending ? icon("loader", "icon spin") : icon("send")}
+          </button>
         </div>
-        <button id="broadcast-send" class="send-fab" data-send-broadcast ${enviavel ? "" : "disabled"} aria-label="Enviar comunicado" title="Enviar comunicado">
-          ${b.sending ? icon("loader", "icon spin") : icon("send")}
-        </button>
       </footer>
     </article>`;
   }
@@ -1832,9 +1943,9 @@
     const previewMeta = $("message-preview-meta");
     if (previewMeta) previewMeta.hidden = !texto;
     const counter = $("broadcast-counter");
-    if (counter) counter.textContent = `${count(b.message.length)} / 4.096`;
+    if (counter) counter.textContent = `${count(b.message.length)} / ${count(messageLimit())}`;
     const send = $("broadcast-send");
-    if (send) send.disabled = b.sending || !texto || !recipients.length || !whatsappConnected();
+    if (send) send.disabled = b.sending || b.uploading || (!texto && !b.media) || b.message.trim().length > messageLimit() || !recipients.length || !whatsappConnected();
   }
 
   function syncBroadcastRecipients() {
@@ -1857,16 +1968,22 @@
     const b = state.broadcast;
     const recipients = selectedRecipients();
     const message = b.message.trim();
-    if (!message || message.length > 4096 || !recipients.length || b.sending) return;
+    const media = b.media;
+    if ((!message && !media) || message.length > messageLimit() || !recipients.length || b.sending) return;
     if (!whatsappConnected()) return toast("WhatsApp desconectado", "error", "Confirme a conexão antes de iniciar o envio.");
-    if (!await askConfirm({ title: `Enviar para ${plural(recipients.length, "número", "números")}?`, message: "O envio começa imediatamente e não pode ser desfeito. Os números serão processados em lotes de cinco.", label: "Iniciar envio", danger: true, extra: `<code>${esc(message.slice(0, 240))}${message.length > 240 ? "…" : ""}</code>` })) return;
+    if (!await askConfirm({
+      title: `Enviar para ${plural(recipients.length, "número", "números")}?`,
+      message: `O envio começa imediatamente e não pode ser desfeito. Os números serão processados em lotes de cinco.${media ? ` Vai junto o anexo ${media.filename}.` : ""}`,
+      label: "Iniciar envio", danger: true,
+      extra: message ? `<code>${esc(message.slice(0, 240))}${message.length > 240 ? "…" : ""}</code>` : ""
+    })) return;
     b.sending = true; b.sent = 0; b.total = recipients.length; b.results = [];
-    b.sentMessage = message; b.sentAt = Date.now();
+    b.sentMessage = message; b.sentMedia = media; b.sentAt = Date.now();
     renderCurrentPage();
     try {
       for (let offset = 0; offset < recipients.length; offset += 5) {
         const batch = recipients.slice(offset, offset + 5);
-        const result = await edge("admin_broadcast_send", { numbers: batch, message });
+        const result = await edge("admin_broadcast_send", { numbers: batch, message, media: media ? { url: media.url, mimetype: media.mimetype, filename: media.filename } : undefined });
         if (result.status !== "ok") throw new Error(result.message || `Lote ${Math.floor(offset / 5) + 1} recusado pelo servidor.`);
         b.results.push(...(result.results || []));
         b.sent += batch.length;
@@ -1874,7 +1991,7 @@
         if (offset + 5 < recipients.length) await new Promise((resolve) => setTimeout(resolve, 900));
       }
       const failed = b.results.filter((item) => item.status !== "sent").length;
-      b.message = "";
+      b.message = ""; b.media = null;
       toast(failed ? "Envio concluído com falhas" : "Comunicado enviado", failed ? "error" : "success", failed ? `${plural(failed, "número não recebeu", "números não receberam")} a mensagem.` : `${plural(recipients.length, "número processado", "números processados")}.`);
     } catch (error) {
       toast("O envio foi interrompido", "error", error.message);
@@ -1978,6 +2095,8 @@
     if (target.dataset.loadList) return applyList(target.dataset.loadList);
     if (target.dataset.deleteList) return deleteList(target.dataset.deleteList);
     if (target.hasAttribute("data-send-broadcast")) return sendBroadcast();
+    if (target.hasAttribute("data-attach-media")) return $("broadcast-file")?.click();
+    if (target.hasAttribute("data-remove-media")) return removeBroadcastMedia();
     if (target.dataset.refreshResource) return retryResource(target.dataset.refreshResource);
     if (target.hasAttribute("data-download-broadcast-failures")) {
       const failures = state.broadcast.results.filter((item) => item.status !== "sent").map((item) => `${item.phone}\t${item.error || item.status}`).join("\n");
@@ -2017,6 +2136,17 @@
     }
   });
 
+  /* Se a miniatura não carregar (Storage fora do ar, arquivo removido), o
+     cartão cai para o ícone de documento em vez de exibir imagem quebrada. */
+  els.page.addEventListener("error", (event) => {
+    const alvo = event.target;
+    if (!(alvo instanceof HTMLImageElement) || !alvo.classList.contains("media-thumb")) return;
+    const substituto = document.createElement("span");
+    substituto.className = "media-thumb media-thumb--doc";
+    substituto.innerHTML = icon("package");
+    alvo.replaceWith(substituto);
+  }, true);
+
   els.page.addEventListener("keydown", (event) => {
     if (event.target.id !== "broadcast-message") return;
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -2026,6 +2156,12 @@
   });
 
   els.page.addEventListener("change", (event) => {
+    if (event.target.id === "broadcast-file") {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (file) uploadBroadcastMedia(file);
+      return;
+    }
     if (event.target.id === "broadcast-segment") { selectSegment(event.target.value); return renderCurrentPage(); }
     if (event.target.matches("input[type=checkbox][data-phone]")) {
       const selecionados = ensureSelection();
