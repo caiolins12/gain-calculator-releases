@@ -45,7 +45,7 @@
     loading: {},
     errors: {},
     sequence: {},
-    userFilter: { search: "", scope: "real", license: "all", activity: "all", sort: "recent" },
+    userFilter: { search: "", scope: "real", license: "all", activity: "all", verification: "all", sort: "recent" },
     diagnosticFilter: { search: "", status: "all", manufacturer: "all", version: "all" },
     traceFilter: "",
     detail: null,
@@ -410,6 +410,13 @@
     return [...grouped.values()];
   }
 
+  /* Três estados possíveis, e a diferença importa: quem confirmou o número,
+     quem cadastrou e não confirmou, e quem nunca informou telefone. */
+  function verificationState(account) {
+    if (!account.phone) return "none";
+    return account.phoneConfirmed ? "verified" : "pending";
+  }
+
   function realAccounts() { return state.accounts.filter((a) => a.userId && !a.isInternal); }
   function uniqueDevices(accounts = realAccounts()) { return new Set(accounts.flatMap((a) => a.devices.map((d) => d.hash))).size; }
 
@@ -748,6 +755,7 @@
       }
       const license = licenseState(account.expiry, account.lifetime);
       if (filter.license !== "all" && license.key !== filter.license) return false;
+      if (filter.verification !== "all" && verificationState(account) !== filter.verification) return false;
       const age = account.lastSeen ? (state.serverNow || state.now) - account.lastSeen : Infinity;
       if (filter.activity === "online" && !isOnline(account.lastSeen)) return false;
       if (filter.activity === "week" && age > 7 * DAY_MS) return false;
@@ -788,6 +796,7 @@
     return `<div class="toolbar"><label class="search-field">${icon("search")}<input id="user-search" type="search" value="${esc(f.search)}" placeholder="Buscar por nome, e-mail, telefone, UUID ou aparelho…" aria-label="Buscar usuários"></label>
       <select id="user-license-filter" class="toolbar-select" aria-label="Filtrar por licença"><option value="all">Todas as licenças</option><option value="active">Ativas</option><option value="expiring">Vencendo</option><option value="expired">Expiradas</option><option value="lifetime">Vitalícias</option><option value="none">Sem licença</option></select>
       <select id="user-activity-filter" class="toolbar-select" aria-label="Filtrar por atividade"><option value="all">Toda atividade</option><option value="online">Online agora</option><option value="week">Ativos em 7 dias</option><option value="month">Ativos em 30 dias</option><option value="inactive">Inativos +30 dias</option><option value="never">Nunca conectaram</option></select>
+      <select id="user-verification-filter" class="toolbar-select" aria-label="Filtrar por verificação de telefone"><option value="all">Toda verificação</option><option value="verified">Telefone verificado</option><option value="pending">Cadastrado, não verificado</option><option value="none">Sem telefone</option></select>
       <select id="user-sort" class="toolbar-select" aria-label="Ordenar usuários"><option value="recent">Mais recentes</option><option value="expiry">Próximos do vencimento</option><option value="usage">Maior monitoramento</option><option value="devices">Mais aparelhos</option><option value="email">E-mail A–Z</option></select>
     </div><div class="filter-row">${chips.map(([value, label]) => `<button class="filter-chip" data-user-scope="${value}" aria-pressed="${f.scope === value}">${label}</button>`).join("")}<span class="result-count" id="user-result-count"></span></div>`;
   }
@@ -802,7 +811,13 @@
       const sub = account.email || account.userId || account.devices[0]?.hash || "Sem identificação";
       return `<tr tabindex="0" data-action="open-user" data-open-user="${esc(account.key)}">
         <td><div class="cell-user"><span class="avatar ${isOnline(account.lastSeen) ? "is-online" : ""}">${esc(initials(account.name, account.email || account.devices[0]?.name))}</span><span style="min-width:0"><span class="cell-primary">${esc(name)}</span><span class="cell-secondary">${esc(sub)}</span></span></div></td>
-        <td>${pill(license.label, license.tone)}${account.isTester || account.isInternal ? `<div class="tags" style="margin-top:0.3125rem">${account.isTester ? '<span class="tag">testador</span>' : ""}${account.isInternal ? '<span class="tag">interna</span>' : ""}</div>` : ""}</td>
+        <td>${pill(license.label, license.tone)}${(() => {
+          const marcas = [];
+          if (verificationState(account) === "verified") marcas.push('<span class="tag tag--ok">verificado</span>');
+          if (account.isTester) marcas.push('<span class="tag">testador</span>');
+          if (account.isInternal) marcas.push('<span class="tag">interna</span>');
+          return marcas.length ? `<div class="tags" style="margin-top:0.3125rem">${marcas.join("")}</div>` : "";
+        })()}</td>
         <td><span class="cell-primary">${isOnline(account.lastSeen) ? "Online" : relative(account.lastSeen)}</span><span class="cell-secondary">${account.lastSeen ? dateTime(account.lastSeen) : "Sem conexão registrada"}</span></td>
         <td><span class="cell-metric">${count(account.devices.length)}</span><span class="cell-secondary">${account.devices.length === 1 ? esc(account.devices[0].name) : "aparelhos"}</span></td>
         <td><span class="cell-metric">${duration(account.totalUsage, true)}</span><span class="cell-secondary">${count(account.segments)} segmentos</span></td>
@@ -1360,11 +1375,15 @@
     const configured = payload.status !== "not_configured";
     const connected = whatsappConnected(payload);
     const config = payload.config || {};
+    // Qual instancia o servidor tem de fato. Quando difere do secret, o painel
+    // precisa mostrar a de verdade — foi a divergencia silenciosa entre as
+    // duas que deixou a verificacao fora do ar sem ninguem enxergar.
+    const instanceInfo = payload.instance || {};
     const qr = qrImageSource(payload.qr_code);
     const statusTitle = !configured ? "Integração não configurada" : connected ? "WhatsApp conectado" : payload.qr_code || payload.pairing_code ? "Aguardando pareamento" : "WhatsApp desconectado";
     const statusCopy = !configured ? "Configure os secrets da Evolution API na Edge Function." : connected ? "A instância está pronta para verificações e comunicados." : "Gere um QR code e faça o pareamento pelo WhatsApp.";
     return header + `<section class="hero-status" style="${connected ? "" : "background:linear-gradient(130deg,rgba(245,200,75,.09),rgba(91,155,255,.035))"}"><span class="hero-status-icon" style="${connected ? "" : "background:var(--yellow-soft);color:var(--yellow)"}">${icon("phone")}</span><div class="hero-status-copy"><span class="eyebrow">Conexão Evolution</span><h3>${esc(statusTitle)}</h3><p>${esc(statusCopy)}</p></div><div class="hero-status-actions">${configured && !connected ? `<button class="button button--primary button--compact" data-whatsapp-action="admin_connect">${icon("refresh")} Gerar pareamento</button>` : ""}${connected ? `<button class="button button--secondary button--compact" data-whatsapp-action="admin_logout">Desconectar</button>` : ""}</div></section>
-      ${configured ? `<section class="content-grid" style="margin-top:0.9375rem"><article class="panel"><div class="panel-head"><div><h3 class="section-title">Configuração da instância</h3><p class="section-copy">Segredos completos nunca são exibidos</p></div>${pill(connected ? "Conectado" : "Desconectado", connected ? "green" : "yellow")}</div><div class="info-list"><div class="info-row"><span>Instância</span><span>${esc(config.instance_name || "—")}</span></div><div class="info-row"><span>Número operador</span><span>${esc(config.owner_number || "—")}</span></div><div class="info-row"><span>Endpoint</span><span>${esc(config.base_url || "—")}</span></div><div class="info-row"><span>Chave</span><span>${esc(config.api_key_masked || "mascarada")}</span></div><div class="info-row"><span>Atualizada</span><span>${esc(config.updated_at ? new Date(config.updated_at).toLocaleString("pt-BR") : "—")}</span></div></div><div class="detail-actions" style="margin-top:0.9375rem"><button class="button button--warning-soft button--compact" data-whatsapp-action="admin_reset">Reiniciar pareamento</button><button class="button button--danger-soft button--compact" data-whatsapp-action="admin_force_recreate">Recriar instância</button></div></article>
+      ${configured ? `<section class="content-grid" style="margin-top:0.9375rem"><article class="panel"><div class="panel-head"><div><h3 class="section-title">Configuração da instância</h3><p class="section-copy">Segredos completos nunca são exibidos</p></div>${pill(connected ? "Conectado" : "Desconectado", connected ? "green" : "yellow")}</div><div class="info-list"><div class="info-row"><span>Instância</span><span>${esc(instanceInfo.resolved || config.instance_name || "—")}${instanceInfo.adopted ? ` <small style="color:var(--yellow)">secret aponta para ${esc(instanceInfo.configured || "—")}</small>` : ""}</span></div><div class="info-row"><span>Número operador</span><span>${esc(config.owner_number || "—")}</span></div><div class="info-row"><span>Endpoint</span><span>${esc(config.base_url || "—")}</span></div><div class="info-row"><span>Chave</span><span>${esc(config.api_key_masked || "mascarada")}</span></div><div class="info-row"><span>Atualizada</span><span>${esc(config.updated_at ? new Date(config.updated_at).toLocaleString("pt-BR") : "—")}</span></div></div><div class="detail-actions" style="margin-top:0.9375rem"><button class="button button--secondary button--compact" data-whatsapp-action="admin_repair">Reparar sem QR</button><button class="button button--warning-soft button--compact" data-whatsapp-action="admin_reset">Reiniciar pareamento</button><button class="button button--danger-soft button--compact" data-whatsapp-action="admin_force_recreate">Recriar instância</button></div></article>
       <article class="panel"><div class="panel-head"><div><h3 class="section-title">Pareamento</h3><p class="section-copy">Use o WhatsApp do número operador</p></div></div><div class="qr-layout qr-layout--tight"><div class="qr-frame">${qr ? `<img src="${esc(qr)}" alt="QR code para conectar o WhatsApp">` : `<div class="qr-placeholder">${icon("phone")}<p>${connected ? "Instância conectada" : "Gere um novo QR code"}</p></div>`}</div><div><h3 class="section-title">${connected ? "Conexão pronta" : "Abra Aparelhos conectados"}</h3><p class="section-copy">No WhatsApp, acesse Configurações → Aparelhos conectados e leia o código.</p>${payload.pairing_code ? `<span class="pairing-code">${esc(payload.pairing_code)}</span>` : ""}${payload.message ? `<div class="notice" style="margin:0.75rem 0 0"><span>${esc(payload.message)}</span></div>` : ""}</div></div></article></section>` : `<div class="notice notice--warning" style="margin-top:0.9375rem">${icon("alert")}<span>A configuração EVOLUTION_BASE_URL, EVOLUTION_API_KEY e EVOLUTION_INSTANCE_NAME precisa ser concluída no servidor.</span></div>`}
       <section style="margin-top:0.9375rem">${renderVerificationMetrics()}</section>`;
   }
@@ -1385,7 +1404,8 @@
       admin_connect: ["Gerando pareamento", false],
       admin_logout: ["Desconectar o WhatsApp?", true],
       admin_reset: ["Reiniciar o pareamento?", true],
-      admin_force_recreate: ["Recriar a instância?", true]
+      admin_force_recreate: ["Recriar a instância?", true],
+      admin_repair: ["Reparando a conexão", false]
     }[action];
     if (config?.[1]) {
       const messages = {
@@ -1399,6 +1419,17 @@
     try {
       const result = await edge(action);
       if (result.status !== "ok") throw new Error(result.message || `A operação retornou “${result.status}”.`);
+      if (action === "admin_repair") {
+        // O reparo devolve o laudo da sondagem, não o payload de status —
+        // recarrega a tela em vez de sobrescrever o que está nela.
+        toast(
+          result.healthy ? "Conexão restabelecida" : "Reparo tentado, socket ainda fechado",
+          result.healthy ? "success" : "error",
+          result.instance?.adopted ? `Instância em uso: ${result.instance.resolved}` : (result.probe?.error || "")
+        );
+        await loadWhatsapp({ quiet: true });
+        return;
+      }
       state.whatsapp = result;
       toast(action === "admin_connect" ? "Pareamento gerado" : "Conexão atualizada");
       if (!whatsappConnected(result)) startWhatsappPolling();
@@ -2057,6 +2088,7 @@
     if (state.page === "users") {
       if ($("user-license-filter")) $("user-license-filter").value = state.userFilter.license;
       if ($("user-activity-filter")) $("user-activity-filter").value = state.userFilter.activity;
+      if ($("user-verification-filter")) $("user-verification-filter").value = state.userFilter.verification;
       if ($("user-sort")) $("user-sort").value = state.userFilter.sort;
     }
   }
@@ -2171,6 +2203,7 @@
     }
     if (event.target.id === "user-license-filter") { state.userFilter.license = event.target.value; $("users-results").innerHTML = renderUserResults(); }
     if (event.target.id === "user-activity-filter") { state.userFilter.activity = event.target.value; $("users-results").innerHTML = renderUserResults(); }
+    if (event.target.id === "user-verification-filter") { state.userFilter.verification = event.target.value; $("users-results").innerHTML = renderUserResults(); }
     if (event.target.id === "user-sort") { state.userFilter.sort = event.target.value; $("users-results").innerHTML = renderUserResults(); }
     if (event.target.id === "diagnostic-manufacturer") { state.diagnosticFilter.manufacturer = event.target.value; $("diagnostic-results").innerHTML = renderDiagnosticResults(); }
     if (event.target.id === "diagnostic-version") { state.diagnosticFilter.version = event.target.value; $("diagnostic-results").innerHTML = renderDiagnosticResults(); }
