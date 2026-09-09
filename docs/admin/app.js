@@ -1034,7 +1034,23 @@
         ${store.errors.backups ? `<div class="notice notice--danger">${icon("alert")}<span>${esc(store.errors.backups)}</span></div>` : ""}
         ${backups?.status === "not_found" ? `<div class="notice"><span>Esta conta ainda não possui dados sincronizados.</span></div>` : ""}
         ${backups?.status === "ok" ? `<div class="notice notice--info">${icon("database")}<span>Atual: <strong>${count(backups.current?.entries_count)}</strong> lançamentos, <strong>${count(backups.current?.accepted_rides_count)}</strong> corridas aceitas e <strong>${count(backups.current?.ride_history_count)}</strong> no histórico.</span></div><div class="backup-list">${(backups.versions || []).map((backup) => `<article class="backup-card"><span class="device-icon">${icon("restore")}</span><span class="backup-copy"><strong>${dateTime(backup.saved_at_ms)}</strong><small>${count(backup.entries_count)} lançamentos · ${count(backup.ride_history_count)} no histórico</small></span><button class="button button--secondary button--compact" data-restore-backup="${asNumber(backup.id)}" data-account="${esc(account.key)}">Restaurar</button></article>`).join("") || '<div class="notice"><span>Nenhum snapshot anterior disponível.</span></div>'}</div>` : ""}
-      </section>`;
+      </section>
+      ${renderUserDangerZone(account)}`;
+  }
+
+  /* Zona de risco: as duas únicas ações do painel que destroem dado do
+     usuário. Ficam juntas, no fim da aba, com o mesmo aviso de que não há
+     desfazer — separadas dos botões de licença, que são reversíveis. */
+  function renderUserDangerZone(account) {
+    if (!account.userId) return "";
+    const phone = account.phone || "";
+    const phoneCopy = phone
+      ? `${phoneLabel(phone)} · ${account.phoneConfirmed ? "verificado" : "não verificado"}`
+      : "Nenhum número cadastrado nesta conta.";
+    return `<section class="detail-section detail-section--danger"><div class="detail-section-head"><div><h3>Zona de risco</h3><p class="section-copy">Ações sem desfazer sobre os dados desta conta</p></div>${pill("Irreversível", "red")}</div><div class="danger-list">
+      <article class="danger-card"><span class="danger-icon">${icon("phone")}</span><span class="danger-copy"><strong>Excluir o telefone cadastrado</strong><small>${esc(phoneCopy)}</small><small>O app volta a pedir a verificação por WhatsApp no próximo acesso; a licença e os dados continuam intactos.</small></span><button class="button button--warning-soft button--compact" data-account-action="clear_phone" data-account="${esc(account.key)}" ${phone ? "" : "disabled"}>Excluir telefone</button></article>
+      <article class="danger-card"><span class="danger-icon danger-icon--red">${icon("trash")}</span><span class="danger-copy"><strong>Excluir a conta por completo</strong><small>${esc(account.email || account.userId)}</small><small>Apaga login, licença, dados sincronizados, backups, diagnósticos e vínculos de aparelho. Pagamentos ficam no histórico fiscal e o aparelho passa a aparecer como órfão.</small></span><button class="button button--danger button--compact" data-account-action="delete" data-account="${esc(account.key)}">Excluir conta</button></article>
+    </div></section>`;
   }
 
   function ensureUserTraceLoaded(account, hours = 24, force = false) {
@@ -1089,6 +1105,80 @@
       toast("Backup restaurado", "success", `${count(result.restored?.entries_count)} lançamentos e ${count(result.restored?.ride_history_count)} corridas recuperados.`);
       const store = detailStore(account); store.backups = undefined; ensureBackupsLoaded(account);
     } catch (error) { toast("Não foi possível restaurar", "error", error.message); }
+  }
+
+  /* Exclusões ------------------------------------------------------------ */
+  const ACCOUNT_ACTION_ERRORS = {
+    forbidden: "Sua sessão não tem permissão de administração.",
+    invalid: "A conta selecionada não tem identificador de usuário.",
+    not_found: "Esta conta já não existe no servidor.",
+    no_phone: "Esta conta já está sem telefone cadastrado.",
+    phone_is_only_login: "O telefone é o único fator confirmado desta conta: removê-lo bloquearia o login.",
+    forbidden_self: "Você não pode excluir a própria conta pelo painel.",
+    forbidden_admin: "Contas com acesso administrativo não são excluídas por aqui.",
+    confirmation_mismatch: "O e-mail digitado não confere com o da conta."
+  };
+
+  function accountActionError(status) {
+    return ACCOUNT_ACTION_ERRORS[status] || `A operação retornou “${status}”.`;
+  }
+
+  async function clearUserPhone(account) {
+    if (!account?.userId) return;
+    const atual = account.phone ? phoneLabel(account.phone) : "sem número";
+    if (!await askConfirm({
+      title: "Excluir o telefone cadastrado?",
+      message: "A conta continua existindo, com licença e dados intactos, mas fica sem número verificado: no próximo acesso o app exige uma nova verificação por WhatsApp antes de liberar as telas.",
+      label: "Excluir telefone",
+      danger: true,
+      extra: `<code>${esc(account.email || account.userId)} · ${esc(atual)}</code>`
+    })) return;
+    try {
+      const result = await rpc("admin_clear_user_phone", { p_user_id: account.userId });
+      if (result.status !== "ok") throw new Error(accountActionError(result.status));
+      account.phone = null;
+      account.phoneConfirmed = false;
+      (state.devices || []).filter((row) => row.user_id === account.userId).forEach((row) => { row.user_phone = null; row.user_phone_confirmed = false; });
+      toast("Telefone excluído", "success", asNumber(result.codes_invalidated)
+        ? `${plural(result.codes_invalidated, "código de verificação invalidado", "códigos de verificação invalidados")}.`
+        : "A conta voltará a pedir verificação por WhatsApp.");
+      renderUserDetail(account); renderCurrentPage();
+      loadDevices({ quiet: true });
+    } catch (error) { toast("Não foi possível excluir o telefone", "error", error.message); }
+  }
+
+  /* O e-mail digitado é conferido aqui e DE NOVO no servidor: a RPC recusa a
+     exclusão se `p_confirm_email` não bater com a conta, então nem um
+     data-account trocado no HTML consegue apagar a conta errada. */
+  async function deleteUserAccount(account) {
+    if (!account?.userId) return;
+    const identificador = account.email || account.userId;
+    const digitado = await askText({
+      title: "Excluir a conta por completo?",
+      message: `Isto remove o login, a licença, os dados sincronizados, os backups, os diagnósticos e os vínculos de aparelho de ${identificador}. Não há como desfazer. Digite o e-mail da conta para confirmar.`,
+      label: "Excluir conta",
+      placeholder: identificador,
+      maxlength: 320,
+      danger: true
+    });
+    if (!digitado) return;
+    if (digitado.toLocaleLowerCase("pt-BR") !== identificador.toLocaleLowerCase("pt-BR")) {
+      return toast("Confirmação não confere", "error", "Digite exatamente o e-mail da conta para excluir.");
+    }
+    try {
+      const result = await rpc("admin_delete_user_account", { p_user_id: account.userId, p_confirm_email: digitado });
+      if (result.status !== "ok") throw new Error(accountActionError(result.status));
+      state.detailData.delete(account.userId || account.key);
+      if (els.detail.open) els.detail.close();
+      const detalhe = [
+        asNumber(result.devices_unlinked) ? plural(result.devices_unlinked, "aparelho desvinculado", "aparelhos desvinculados") : "",
+        asNumber(result.backups_removed) ? plural(result.backups_removed, "backup apagado", "backups apagados") : "",
+        asNumber(result.diagnostics_removed) ? plural(result.diagnostics_removed, "diagnóstico apagado", "diagnósticos apagados") : ""
+      ].filter(Boolean).join(" · ");
+      toast("Conta excluída", "success", detalhe || identificador);
+      await loadDevices({ quiet: true });
+      loadDiagnostics({ quiet: true });
+    } catch (error) { toast("Não foi possível excluir a conta", "error", error.message); }
   }
 
   /* Diagnósticos --------------------------------------------------------- */
@@ -2127,15 +2217,15 @@
     });
   }
 
-  function askText({ title, message, label = "Salvar", placeholder = "", value = "" }) {
+  function askText({ title, message, label = "Salvar", placeholder = "", value = "", maxlength = 40, danger = false }) {
     $("confirm-title").textContent = title;
     $("confirm-message").textContent = message;
-    $("confirm-extra").innerHTML = `<input id="confirm-text" type="text" maxlength="40" placeholder="${esc(placeholder)}" value="${esc(value)}" style="margin-top:0.75rem">`;
+    $("confirm-extra").innerHTML = `<input id="confirm-text" type="text" maxlength="${asNumber(maxlength, 40)}" placeholder="${esc(placeholder)}" value="${esc(value)}" style="margin-top:0.75rem">`;
     const action = $("confirm-action");
     action.textContent = label;
-    action.className = "button button--primary";
-    $("confirm-icon").style.background = "var(--green-soft)";
-    $("confirm-icon").style.color = "var(--green)";
+    action.className = `button ${danger ? "button--danger" : "button--primary"}`;
+    $("confirm-icon").style.background = danger ? "var(--red-soft)" : "var(--green-soft)";
+    $("confirm-icon").style.color = danger ? "var(--red)" : "var(--green)";
     els.confirm.returnValue = "cancel";
     els.confirm.showModal();
     const input = $("confirm-text");
@@ -2306,6 +2396,8 @@
     if (target.dataset.refreshUser) return refreshUser(findAccount(target.dataset.refreshUser));
     if (target.dataset.copy != null) return copyText(target.dataset.copy, "Identificador copiado");
     if (target.dataset.licenseAction) return handleLicenseAction(findAccount(target.dataset.account), target.dataset.licenseAction);
+    if (target.dataset.accountAction === "clear_phone") return clearUserPhone(findAccount(target.dataset.account));
+    if (target.dataset.accountAction === "delete") return deleteUserAccount(findAccount(target.dataset.account));
     if (target.dataset.restoreBackup) return restoreBackup(findAccount(target.dataset.account), target.dataset.restoreBackup);
     if (target.dataset.setDiagnosticStatus) return setDiagnosticStatus(target.dataset.diagnosticId, target.dataset.setDiagnosticStatus);
     if (target.dataset.copyDiagnosticLog) { const report = state.diagnostics.find((item) => asNumber(item.id) === asNumber(target.dataset.copyDiagnosticLog)); return copyText(report?.log_text, "Log copiado"); }
