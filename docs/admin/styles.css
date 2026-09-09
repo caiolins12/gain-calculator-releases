@@ -429,6 +429,7 @@ button.attention-item:hover, button.activity-item:hover { background: rgba(255,2
 .status-pill::before { content: ""; width: 0.3125rem; height: 0.3125rem; flex: 0 0 auto; border-radius: 50%; background: currentColor; }
 .tag { min-height: 1.25rem; padding: 0 0.4375rem; border: 1px solid var(--line); background: rgba(255,255,255,.025); color: var(--muted); }
 .tag--ok { border-color: rgba(52,212,123,.28); background: var(--green-soft); color: #78e3a8; }
+.tag--warning { border-color: rgba(255,204,77,.28); background: var(--yellow-soft); color: var(--yellow); }
 .pill-green { background: var(--green-soft); color: var(--green); }
 .pill-blue { background: var(--blue-soft); color: var(--blue); }
 .pill-purple { background: var(--purple-soft); color: var(--purple); }

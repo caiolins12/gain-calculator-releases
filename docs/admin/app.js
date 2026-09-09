@@ -778,7 +778,7 @@
     const online = accounts.filter((a) => isOnline(a.lastSeen)).length;
     const active = accounts.filter((a) => ["active", "expiring", "lifetime"].includes(licenseState(a.expiry, a.lifetime).key)).length;
     const expiring = accounts.filter((a) => licenseState(a.expiry, a.lifetime).key === "expiring").length;
-    const header = pageHeading("Contas e acessos", "A licença pertence à conta. Aparelhos compartilhados e registros internos são tratados sem distorcer a base real.");
+    const header = pageHeading("Contas e acessos", "A licença pertence à conta. Aparelhos compartilhados e registros internos são tratados sem distorcer a base real.") + versionReferenceNotice();
     if (!state.devices && state.loading.devices) return header + loadingState("Carregando contas e aparelhos…");
     if (state.errors.devices && !state.devices) return header + errorState(state.errors.devices, "devices");
     return header + `<section class="metric-grid metric-grid--five">
@@ -787,7 +787,7 @@
       ${metricCard("Acesso ativo", count(active), `${pct(active, accounts.length)}% da base`, "green", "key")}
       ${metricCard("Vencendo", count(expiring), "Prazo de até 7 dias", expiring ? "yellow" : "blue", "clock")}
       ${metricCard("Aparelhos", count(uniqueDevices()), `${count(state.accounts.filter((a) => a.isOrphan).length)} sem conta`, "purple", "device")}
-    </section>${renderUserToolbar()}<div id="users-results">${renderUserResults()}</div>`;
+    </section>${state.errors.versions ? `<div class="notice notice--warning">${icon("alert")}<span>Não foi possível consultar as versões dos aplicativos. ${esc(state.errors.versions)}</span><button class="button button--secondary button--compact" data-retry="versions">Tentar novamente</button></div>` : ""}${renderUserToolbar()}<div id="users-results">${renderUserResults()}</div>`;
   }
 
   function renderUserToolbar() {
@@ -803,9 +803,7 @@
 
   function renderUserResults() {
     const list = filteredAccounts();
-    const updatedUsers = updatedAppUserIds();
-    const release = state.versions?.latest_release;
-    const updatedTag = `<span class="tag tag--ok" title="${esc(`Todos os aparelhos vinculados estão na versão ${release?.version_name || release?.version_code} ou superior`)}">app atualizado</span>`;
+    const versionTags = userAppVersionTags();
     setTimeout(() => { const countNode = $("user-result-count"); if (countNode) countNode.textContent = `${list.length} ${list.length === 1 ? "resultado" : "resultados"}`; }, 0);
     if (!list.length) return `<div class="table-card">${emptyState("Nenhuma conta encontrada", "Ajuste a busca ou remova alguns filtros.", "search")}</div>`;
     const rows = list.map((account) => {
@@ -817,7 +815,7 @@
         <td>${pill(license.label, license.tone)}${(() => {
           const marcas = [];
           if (verificationState(account) === "verified") marcas.push('<span class="tag tag--ok">verificado</span>');
-          if (updatedUsers.has(account.userId)) marcas.push(updatedTag);
+          marcas.push(versionTags.get(account.key));
           if (account.isTester) marcas.push('<span class="tag">testador</span>');
           if (account.isInternal) marcas.push('<span class="tag">interna</span>');
           return marcas.length ? `<div class="tags" style="margin-top:0.3125rem">${marcas.join("")}</div>` : "";
@@ -828,7 +826,7 @@
         <td class="cell-actions"><span class="row-arrow">${icon("chevron-right")}</span></td>
       </tr>`;
     }).join("");
-    const cards = list.map((account) => { const license = licenseState(account.expiry, account.lifetime); return `<button class="mobile-data-card" data-open-user="${esc(account.key)}"><span class="cell-user"><span class="avatar ${isOnline(account.lastSeen) ? "is-online" : ""}">${esc(initials(account.name, account.email || account.devices[0]?.name))}</span><span style="min-width:0"><span class="cell-primary">${esc(account.name || account.email || "Aparelho sem conta")}</span><span class="cell-secondary">${relative(account.lastSeen)} · ${count(account.devices.length)} ${account.devices.length === 1 ? "aparelho" : "aparelhos"}</span></span></span><span class="mobile-data-side">${pill(license.label, license.tone)}${updatedUsers.has(account.userId) ? updatedTag : ""}<span class="cell-secondary">${duration(account.totalUsage, true)}</span></span></button>`; }).join("");
+    const cards = list.map((account) => { const license = licenseState(account.expiry, account.lifetime); return `<button class="mobile-data-card" data-open-user="${esc(account.key)}"><span class="cell-user"><span class="avatar ${isOnline(account.lastSeen) ? "is-online" : ""}">${esc(initials(account.name, account.email || account.devices[0]?.name))}</span><span style="min-width:0"><span class="cell-primary">${esc(account.name || account.email || "Aparelho sem conta")}</span><span class="cell-secondary">${relative(account.lastSeen)} · ${count(account.devices.length)} ${account.devices.length === 1 ? "aparelho" : "aparelhos"}</span></span></span><span class="mobile-data-side">${pill(license.label, license.tone)}${versionTags.get(account.key)}<span class="cell-secondary">${duration(account.totalUsage, true)}</span></span></button>`; }).join("");
     return `<div class="table-card"><table class="data-table"><colgroup><col style="width:27%"><col style="width:18%"><col style="width:20%"><col style="width:14%"><col style="width:15%"><col style="width:6%"></colgroup><thead><tr><th>Conta</th><th>Licença</th><th>Última atividade</th><th>Aparelhos</th><th>Monitoramento</th><th></th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-card-list">${cards}</div><footer class="table-footer"><span>${list.length} de ${state.accounts.length} registros</span><span>Atualizado ${state.lastUpdated ? relative(state.lastUpdated, Date.now()).toLowerCase() : "agora"}</span></footer></div>`;
   }
 
@@ -1227,22 +1225,51 @@
   }
 
   /* Versões -------------------------------------------------------------- */
-  function updatedAppUserIds() {
-    const currentCode = asNumber(state.versions?.latest_release?.version_code);
-    if (currentCode <= 0 || state.errors.versions) return new Set();
+  function appVersionReference() {
+    const release = state.versions?.latest_release;
+    const reported = (state.versions?.devices || []).filter((device) => !device.is_internal)
+      .reduce((latest, device) => asNumber(device.app_version_code) > asNumber(latest?.app_version_code) ? device : latest, null);
+    // O catálogo legado de APKs pode estar atrás das versões distribuídas pela Play Store.
+    const observed = asNumber(reported?.app_version_code) > asNumber(release?.version_code);
+    return {
+      code: asNumber(observed ? reported?.app_version_code : release?.version_code),
+      name: observed ? reported?.app_version_name : release?.version_name,
+      observed
+    };
+  }
+
+  function userAppVersionTags() {
+    const reference = appVersionReference();
     const devicesByUser = new Map();
     (state.versions?.devices || []).forEach((device) => {
       if (!device.user_id) return;
       if (!devicesByUser.has(device.user_id)) devicesByUser.set(device.user_id, new Map());
-      devicesByUser.get(device.user_id).set(device.device_hash, asNumber(device.app_version_code));
+      devicesByUser.get(device.user_id).set(device.device_hash, device);
     });
-    // Só confirma a atualização com versão conhecida para todos os vínculos da conta.
-    return new Set(state.accounts.filter((account) => {
+    return new Map(state.accounts.map((account) => {
+      const tag = (label, title, tone = "") => [account.key, `<span class="tag${tone ? ` tag--${tone}` : ""}" title="${esc(title)}">${esc(label)}</span>`];
+      if (state.loading.versions) return tag("consultando versão", "Consultando a versão instalada nos aparelhos desta conta.");
+      if (state.errors.versions) return tag("versão indisponível", "Não foi possível consultar as versões. Tente atualizar os dados.");
+      if (!state.versions) return tag("consultando versão", "Aguardando os dados de versão.");
       const versions = devicesByUser.get(account.userId);
-      return account.userId && account.devices.length > 0 && versions?.size > 0
-        && [...versions.values()].every((code) => code >= currentCode)
-        && account.devices.every((device) => (versions.get(device.hash) || 0) >= currentCode);
-    }).map((account) => account.userId));
+      const hashes = new Set([...account.devices.map((device) => device.hash), ...(versions?.keys() || [])]);
+      const devices = [...hashes].map((hash) => versions?.get(hash));
+      const known = devices.filter((device) => asNumber(device?.app_version_code) > 0);
+      if (!known.length) return tag("versão não informada", "Nenhum aparelho desta conta informou o código da versão instalada.");
+      if (reference.code <= 0) return tag("referência indisponível", "Ainda não há uma versão de referência para comparar.");
+      const current = known.filter((device) => asNumber(device.app_version_code) >= reference.code);
+      const target = `Referência: ${reference.name || reference.code} (${reference.observed ? "mais recente identificada nos aparelhos; catálogo de releases desatualizado ou ausente" : "release publicada"}).`;
+      const installed = `Versões informadas: ${[...new Set(known.map((device) => device.app_version_name || device.app_version_code))].join(", ")}.`;
+      if (current.length === devices.length) return tag("app atualizado", `Todos os aparelhos vinculados estão atualizados. ${installed} ${target}`, "ok");
+      if (current.length) return tag("atualização parcial", `${current.length} de ${devices.length} aparelhos estão atualizados; os demais estão em versão anterior ou não informaram a versão. ${installed} ${target}`, "warning");
+      return tag("app desatualizado", `Os aparelhos com versão conhecida estão em uma versão anterior. ${installed} ${target}`, "warning");
+    }));
+  }
+
+  function versionReferenceNotice() {
+    const reference = appVersionReference();
+    if (!reference.observed || state.errors.versions || state.loading.versions) return "";
+    return `<div class="notice notice--info">${icon("package")}<span>Versão de referência: <strong>${esc(reference.name || reference.code)}</strong>, a mais recente informada pelos aparelhos. O catálogo de releases ainda não registra essa versão.</span></div>`;
   }
 
   function loadVersions(options = {}) {
@@ -1257,7 +1284,7 @@
     const release = payload.latest_release || null;
     const devices = (payload.devices || []).filter((item) => !item.is_internal);
     const known = devices.filter((item) => item.app_version_code != null || item.app_version_name);
-    const currentCode = asNumber(release?.version_code, Math.max(0, ...known.map((item) => asNumber(item.app_version_code))));
+    const currentCode = appVersionReference().code;
     const current = known.filter((item) => asNumber(item.app_version_code) >= currentCode && currentCode > 0);
     const outdated = known.filter((item) => currentCode > 0 && asNumber(item.app_version_code) < currentCode);
     const unknown = devices.filter((item) => item.app_version_code == null && !item.app_version_name);
@@ -1273,7 +1300,7 @@
   }
 
   function renderVersions() {
-    const header = pageHeading("Adoção de versões", "A versão atual vem do catálogo de releases; a distribuição instalada vem dos vínculos conta × aparelho.");
+    const header = pageHeading("Adoção de versões", "Comparação com o catálogo de releases e as versões informadas pelos aparelhos.") + versionReferenceNotice();
     if (!state.versions && state.loading.versions) return header + loadingState("Consultando a distribuição instalada…");
     if (state.errors.versions && !state.versions) return header + `<div class="notice notice--warning">${icon("alert")}<span><strong>O novo resumo global precisa estar publicado no Supabase.</strong><br>${esc(state.errors.versions)}</span></div>${errorState("Aplique a migração 20260827000000_admin_hub_overview.sql e tente novamente.", "versions")}`;
     if (!state.versions) return header;
