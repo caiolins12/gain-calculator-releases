@@ -801,6 +801,15 @@
     </div><div class="filter-row">${chips.map(([value, label]) => `<button class="filter-chip" data-user-scope="${value}" aria-pressed="${f.scope === value}">${label}</button>`).join("")}<span class="result-count" id="user-result-count"></span></div>`;
   }
 
+  function renderUserIdentity(account) {
+    const name = account.name || account.email || (account.isOrphan ? "Aparelho sem conta" : "Conta sem nome");
+    const sub = account.email || account.userId || account.devices[0]?.hash || "Sem identificação";
+    const verified = verificationState(account) === "verified"
+      ? `<span class="user-verified" role="img" aria-label="Telefone verificado" title="Telefone verificado">${icon("check-circle")}</span>` : "";
+    const roles = [account.isTester ? "Testador" : "", account.isInternal ? "Conta interna" : ""].filter(Boolean);
+    return `<span class="cell-user user-identity"><span class="avatar ${isOnline(account.lastSeen) ? "is-online" : ""}">${esc(initials(account.name, account.email || account.devices[0]?.name))}</span><span class="user-identity-copy"><span class="user-name"><span class="cell-primary">${esc(name)}</span>${verified}</span><span class="cell-secondary">${esc(sub)}</span>${roles.length ? `<span class="user-meta">${roles.map((role) => `<span>${role}</span>`).join("")}</span>` : ""}</span></span>`;
+  }
+
   function renderUserResults() {
     const list = filteredAccounts();
     const versionTags = userAppVersionTags();
@@ -808,26 +817,24 @@
     if (!list.length) return `<div class="table-card">${emptyState("Nenhuma conta encontrada", "Ajuste a busca ou remova alguns filtros.", "search")}</div>`;
     const rows = list.map((account) => {
       const license = licenseState(account.expiry, account.lifetime);
-      const name = account.name || account.email || (account.isOrphan ? "Aparelho sem conta" : "Conta sem nome");
-      const sub = account.email || account.userId || account.devices[0]?.hash || "Sem identificação";
       return `<tr tabindex="0" data-action="open-user" data-open-user="${esc(account.key)}">
-        <td><div class="cell-user"><span class="avatar ${isOnline(account.lastSeen) ? "is-online" : ""}">${esc(initials(account.name, account.email || account.devices[0]?.name))}</span><span style="min-width:0"><span class="cell-primary">${esc(name)}</span><span class="cell-secondary">${esc(sub)}</span></span></div></td>
-        <td>${pill(license.label, license.tone)}${(() => {
-          const marcas = [];
-          if (verificationState(account) === "verified") marcas.push('<span class="tag tag--ok">verificado</span>');
-          marcas.push(versionTags.get(account.key));
-          if (account.isTester) marcas.push('<span class="tag">testador</span>');
-          if (account.isInternal) marcas.push('<span class="tag">interna</span>');
-          return marcas.length ? `<div class="tags" style="margin-top:0.3125rem">${marcas.join("")}</div>` : "";
-        })()}</td>
+        <td>${renderUserIdentity(account)}</td>
+        <td>${pill(license.label, license.tone)}</td>
         <td><span class="cell-primary">${isOnline(account.lastSeen) ? "Online" : relative(account.lastSeen)}</span><span class="cell-secondary">${account.lastSeen ? dateTime(account.lastSeen) : "Sem conexão registrada"}</span></td>
-        <td><span class="cell-metric">${count(account.devices.length)}</span><span class="cell-secondary">${account.devices.length === 1 ? esc(account.devices[0].name) : "aparelhos"}</span></td>
+        <td><span class="user-device-summary"><span class="cell-metric">${count(account.devices.length)}</span><span>${account.devices.length === 1 ? esc(account.devices[0].name) : "aparelhos"}</span></span>${versionTags.get(account.key)}</td>
         <td><span class="cell-metric">${duration(account.totalUsage, true)}</span><span class="cell-secondary">${count(account.segments)} segmentos</span></td>
         <td class="cell-actions"><span class="row-arrow">${icon("chevron-right")}</span></td>
       </tr>`;
     }).join("");
-    const cards = list.map((account) => { const license = licenseState(account.expiry, account.lifetime); return `<button class="mobile-data-card" data-open-user="${esc(account.key)}"><span class="cell-user"><span class="avatar ${isOnline(account.lastSeen) ? "is-online" : ""}">${esc(initials(account.name, account.email || account.devices[0]?.name))}</span><span style="min-width:0"><span class="cell-primary">${esc(account.name || account.email || "Aparelho sem conta")}</span><span class="cell-secondary">${relative(account.lastSeen)} · ${count(account.devices.length)} ${account.devices.length === 1 ? "aparelho" : "aparelhos"}</span></span></span><span class="mobile-data-side">${pill(license.label, license.tone)}${versionTags.get(account.key)}<span class="cell-secondary">${duration(account.totalUsage, true)}</span></span></button>`; }).join("");
-    return `<div class="table-card"><table class="data-table"><colgroup><col style="width:27%"><col style="width:18%"><col style="width:20%"><col style="width:14%"><col style="width:15%"><col style="width:6%"></colgroup><thead><tr><th>Conta</th><th>Licença</th><th>Última atividade</th><th>Aparelhos</th><th>Monitoramento</th><th></th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-card-list">${cards}</div><footer class="table-footer"><span>${list.length} de ${state.accounts.length} registros</span><span>Atualizado ${state.lastUpdated ? relative(state.lastUpdated, Date.now()).toLowerCase() : "agora"}</span></footer></div>`;
+    const cards = list.map((account) => {
+      const license = licenseState(account.expiry, account.lifetime);
+      return `<button class="mobile-data-card user-card" data-open-user="${esc(account.key)}">
+        <span class="user-card-header">${renderUserIdentity(account)}<span class="row-arrow">${icon("chevron-right")}</span></span>
+        <span class="user-card-statuses"><span><span class="user-card-label">Licença</span>${pill(license.label, license.tone)}</span><span><span class="user-card-label">Aplicativo</span>${versionTags.get(account.key)}</span></span>
+        <span class="user-card-footer"><span>${isOnline(account.lastSeen) ? "Online agora" : relative(account.lastSeen)}</span><span>${count(account.devices.length)} ${account.devices.length === 1 ? "aparelho" : "aparelhos"}</span><span title="Tempo de monitoramento">${icon("activity")}${duration(account.totalUsage, true)}</span></span>
+      </button>`;
+    }).join("");
+    return `<div class="table-card"><table class="data-table users-table"><colgroup><col style="width:30%"><col style="width:15%"><col style="width:18%"><col style="width:19%"><col style="width:14%"><col style="width:4%"></colgroup><thead><tr><th>Conta</th><th>Licença</th><th>Última atividade</th><th>Aparelhos e app</th><th>Monitoramento</th><th></th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-card-list">${cards}</div><footer class="table-footer"><span>${list.length} de ${state.accounts.length} registros</span><span>Atualizado ${state.lastUpdated ? relative(state.lastUpdated, Date.now()).toLowerCase() : "agora"}</span></footer></div>`;
   }
 
   /* Detalhe de usuário --------------------------------------------------- */
@@ -1247,7 +1254,7 @@
       devicesByUser.get(device.user_id).set(device.device_hash, device);
     });
     return new Map(state.accounts.map((account) => {
-      const tag = (label, title, tone = "") => [account.key, `<span class="tag${tone ? ` tag--${tone}` : ""}" title="${esc(title)}">${esc(label)}</span>`];
+      const tag = (label, title, tone = "") => [account.key, `<span class="user-version-status${tone ? ` user-version-status--${tone}` : ""}" title="${esc(title)}">${icon(tone === "ok" ? "check-circle" : tone === "warning" ? "alert" : "package")}<span>${esc(label)}</span></span>`];
       if (state.loading.versions) return tag("consultando versão", "Consultando a versão instalada nos aparelhos desta conta.");
       if (state.errors.versions) return tag("versão indisponível", "Não foi possível consultar as versões. Tente atualizar os dados.");
       if (!state.versions) return tag("consultando versão", "Aguardando os dados de versão.");

@@ -440,6 +440,23 @@ button.attention-item:hover, button.activity-item:hover { background: rgba(255,2
 .table-footer { display: flex; align-items: center; justify-content: space-between; min-height: 2.9375rem; padding: 0 1rem; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 0.5rem; }
 .mobile-card-list { display: none; }
 
+/* Usuários: identidade, licença e aplicativo têm hierarquias próprias. */
+.users-table td { height: 4.75rem; padding-block: 0.875rem; }
+.user-identity-copy { flex: 1; min-width: 0; }
+.user-name { display: flex; align-items: center; gap: 0.3125rem; min-width: 0; }
+.user-name .cell-primary { min-width: 0; }
+.user-verified { flex: 0 0 auto; display: inline-flex; color: #78cfa0; }
+.user-verified .icon { width: 0.75rem; height: 0.75rem; }
+.user-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3125rem; margin-top: 0.25rem; color: var(--muted); font-size: 0.4625rem; font-weight: 500; }
+.user-meta > span + span::before { content: "·"; margin-right: 0.3125rem; color: #506174; }
+.user-device-summary { display: flex; align-items: baseline; gap: 0.375rem; min-width: 0; }
+.user-device-summary > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 0.5rem; }
+.user-version-status { display: flex; align-items: flex-start; gap: 0.3125rem; margin-top: 0.3125rem; color: var(--muted); font-size: 0.5rem; font-weight: 500; line-height: 1.5; }
+.user-version-status .icon { flex: 0 0 auto; width: 0.6875rem; height: 0.6875rem; margin-top: 0.03125rem; }
+.user-version-status > span { min-width: 0; overflow-wrap: anywhere; }
+.user-version-status--ok { color: #78cfa0; }
+.user-version-status--warning { color: #d2b770; }
+
 /* Detalhes e diálogos */
 dialog { color: var(--text); }
 dialog::backdrop { background: rgba(2,6,10,.72); backdrop-filter: blur(4px); }
@@ -829,6 +846,22 @@ dialog::backdrop { background: rgba(2,6,10,.72); backdrop-filter: blur(4px); }
   .mobile-data-card { width: 100%; min-width: 0; display: flex; align-items: center; gap: 0.6875rem; padding: 0.8125rem; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface); color: var(--text); cursor: pointer; text-align: left; }
   .mobile-data-card .cell-user { flex: 1; min-width: 0; }
   .mobile-data-side { display: grid; justify-items: end; gap: 0.3125rem; }
+  .mobile-data-card.user-card { display: grid; gap: 0.875rem; padding: 1rem; transition: border-color .15s, background .15s; }
+  .user-card:hover { border-color: #34465a; background: var(--surface-2); }
+  .user-card-header { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+  .user-card-header .row-arrow { flex: 0 0 auto; width: 0.875rem; }
+  .user-card .user-name .cell-primary { font-size: 0.75rem; }
+  .user-card .cell-secondary { font-size: 0.5625rem; }
+  .user-card .user-meta { font-size: 0.5rem; }
+  .user-card-statuses { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--line-soft); }
+  .user-card-statuses > span { min-width: 0; }
+  .user-card-label { display: block; margin-bottom: 0.3125rem; color: var(--muted); font-size: 0.5rem; }
+  .user-card .user-version-status { margin-top: 0; min-height: 1.5rem; align-items: center; font-size: 0.5625rem; }
+  .user-card .user-version-status .icon { margin-top: 0; }
+  .user-card-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.75rem; color: var(--muted); font-size: 0.5rem; }
+  .user-card-footer > span { display: inline-flex; align-items: center; gap: 0.25rem; }
+  .user-card-footer > span:last-child { margin-left: auto; }
+  .user-card-footer .icon { width: 0.625rem; height: 0.625rem; }
   .table-footer { border: 0; padding: 0.75rem 0.125rem 0; }
   .filter-row { flex-wrap: wrap; overflow-x: visible; }
   .detail-dialog { width: 100%; }
