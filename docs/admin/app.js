@@ -513,7 +513,7 @@
     try {
       const loaders = {
         overview: () => Promise.allSettled([loadDevices({ quiet: true }), loadStatistics({ quiet: true }), loadDiagnostics({ quiet: true }), loadHealth({ quiet: true })]),
-        users: () => loadDevices({ quiet: true }),
+        users: () => Promise.allSettled([loadDevices({ quiet: true }), loadVersions({ quiet: true })]),
         diagnostics: () => loadDiagnostics({ quiet: true }),
         analytics: () => loadStatistics({ quiet: true }),
         versions: () => loadVersions({ quiet: true }),
@@ -558,7 +558,7 @@
   }
 
   function activatePageData(page) {
-    if (page === "versions" && !state.versions && !state.loading.versions) loadVersions();
+    if (["users", "versions"].includes(page) && !state.versions && !state.loading.versions) loadVersions();
     if (page === "traces" && !state.traces && !state.loading.traces) loadTraces();
     if (page === "services") {
       if (!state.health && !state.loading.health) loadHealth();
@@ -803,6 +803,9 @@
 
   function renderUserResults() {
     const list = filteredAccounts();
+    const updatedUsers = updatedAppUserIds();
+    const release = state.versions?.latest_release;
+    const updatedTag = `<span class="tag tag--ok" title="${esc(`Todos os aparelhos vinculados estão na versão ${release?.version_name || release?.version_code} ou superior`)}">app atualizado</span>`;
     setTimeout(() => { const countNode = $("user-result-count"); if (countNode) countNode.textContent = `${list.length} ${list.length === 1 ? "resultado" : "resultados"}`; }, 0);
     if (!list.length) return `<div class="table-card">${emptyState("Nenhuma conta encontrada", "Ajuste a busca ou remova alguns filtros.", "search")}</div>`;
     const rows = list.map((account) => {
@@ -814,6 +817,7 @@
         <td>${pill(license.label, license.tone)}${(() => {
           const marcas = [];
           if (verificationState(account) === "verified") marcas.push('<span class="tag tag--ok">verificado</span>');
+          if (updatedUsers.has(account.userId)) marcas.push(updatedTag);
           if (account.isTester) marcas.push('<span class="tag">testador</span>');
           if (account.isInternal) marcas.push('<span class="tag">interna</span>');
           return marcas.length ? `<div class="tags" style="margin-top:0.3125rem">${marcas.join("")}</div>` : "";
@@ -824,7 +828,7 @@
         <td class="cell-actions"><span class="row-arrow">${icon("chevron-right")}</span></td>
       </tr>`;
     }).join("");
-    const cards = list.map((account) => { const license = licenseState(account.expiry, account.lifetime); return `<button class="mobile-data-card" data-open-user="${esc(account.key)}"><span class="cell-user"><span class="avatar ${isOnline(account.lastSeen) ? "is-online" : ""}">${esc(initials(account.name, account.email || account.devices[0]?.name))}</span><span style="min-width:0"><span class="cell-primary">${esc(account.name || account.email || "Aparelho sem conta")}</span><span class="cell-secondary">${relative(account.lastSeen)} · ${count(account.devices.length)} ${account.devices.length === 1 ? "aparelho" : "aparelhos"}</span></span></span><span class="mobile-data-side">${pill(license.label, license.tone)}<span class="cell-secondary">${duration(account.totalUsage, true)}</span></span></button>`; }).join("");
+    const cards = list.map((account) => { const license = licenseState(account.expiry, account.lifetime); return `<button class="mobile-data-card" data-open-user="${esc(account.key)}"><span class="cell-user"><span class="avatar ${isOnline(account.lastSeen) ? "is-online" : ""}">${esc(initials(account.name, account.email || account.devices[0]?.name))}</span><span style="min-width:0"><span class="cell-primary">${esc(account.name || account.email || "Aparelho sem conta")}</span><span class="cell-secondary">${relative(account.lastSeen)} · ${count(account.devices.length)} ${account.devices.length === 1 ? "aparelho" : "aparelhos"}</span></span></span><span class="mobile-data-side">${pill(license.label, license.tone)}${updatedUsers.has(account.userId) ? updatedTag : ""}<span class="cell-secondary">${duration(account.totalUsage, true)}</span></span></button>`; }).join("");
     return `<div class="table-card"><table class="data-table"><colgroup><col style="width:27%"><col style="width:18%"><col style="width:20%"><col style="width:14%"><col style="width:15%"><col style="width:6%"></colgroup><thead><tr><th>Conta</th><th>Licença</th><th>Última atividade</th><th>Aparelhos</th><th>Monitoramento</th><th></th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-card-list">${cards}</div><footer class="table-footer"><span>${list.length} de ${state.accounts.length} registros</span><span>Atualizado ${state.lastUpdated ? relative(state.lastUpdated, Date.now()).toLowerCase() : "agora"}</span></footer></div>`;
   }
 
@@ -1223,6 +1227,24 @@
   }
 
   /* Versões -------------------------------------------------------------- */
+  function updatedAppUserIds() {
+    const currentCode = asNumber(state.versions?.latest_release?.version_code);
+    if (currentCode <= 0 || state.errors.versions) return new Set();
+    const devicesByUser = new Map();
+    (state.versions?.devices || []).forEach((device) => {
+      if (!device.user_id) return;
+      if (!devicesByUser.has(device.user_id)) devicesByUser.set(device.user_id, new Map());
+      devicesByUser.get(device.user_id).set(device.device_hash, asNumber(device.app_version_code));
+    });
+    // Só confirma a atualização com versão conhecida para todos os vínculos da conta.
+    return new Set(state.accounts.filter((account) => {
+      const versions = devicesByUser.get(account.userId);
+      return account.userId && account.devices.length > 0 && versions?.size > 0
+        && [...versions.values()].every((code) => code >= currentCode)
+        && account.devices.every((device) => (versions.get(device.hash) || 0) >= currentCode);
+    }).map((account) => account.userId));
+  }
+
   function loadVersions(options = {}) {
     return loadResource("versions", () => rpc("admin_version_overview", {}), (result) => {
       if (result.status !== "ok") throw new Error("O resumo global de versões não está disponível.");
