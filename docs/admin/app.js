@@ -1361,9 +1361,17 @@
       const current = known.filter((device) => asNumber(device.app_version_code) >= reference.code);
       const target = `Referência: ${reference.name || reference.code} (${reference.observed ? "mais recente identificada nos aparelhos; catálogo de releases desatualizado ou ausente" : "release publicada"}).`;
       const installed = `Versões informadas: ${[...new Set(known.map((device) => device.app_version_name || device.app_version_code))].join(", ")}.`;
-      if (current.length === devices.length) return tag("app atualizado", `Todos os aparelhos vinculados estão atualizados. ${installed} ${target}`, "ok");
-      if (current.length) return tag("atualização parcial", `${current.length} de ${devices.length} aparelhos estão atualizados; os demais estão em versão anterior ou não informaram a versão. ${installed} ${target}`, "warning");
-      return tag("app desatualizado", `Os aparelhos com versão conhecida estão em uma versão anterior. ${installed} ${target}`, "warning");
+      /* Basta um aparelho na versão atual: quem está atualizada é a conta, não
+         cada celular dela. O aparelho antigo que ficou na gaveta com a versão
+         velha não torna o motorista "desatualizado". O detalhe por aparelho
+         continua no título, para quem quiser saber qual ficou para trás. */
+      if (current.length) {
+        const scope = current.length === devices.length
+          ? "Todos os aparelhos vinculados estão atualizados."
+          : `${current.length} de ${devices.length} aparelhos estão na versão atual; os demais estão em versão anterior ou não informaram a versão.`;
+        return tag("app atualizado", `${scope} ${installed} ${target}`, "ok");
+      }
+      return tag("app desatualizado", `Nenhum aparelho desta conta está na versão atual. ${installed} ${target}`, "warning");
     }));
   }
 
@@ -1378,6 +1386,20 @@
       if (result.status !== "ok") throw new Error("O resumo global de versões não está disponível.");
       state.versions = result;
     }, options);
+  }
+
+  /* Contas com pelo menos um aparelho na versão de referência — a mesma regra
+     do indicador da tabela de contas. "Contas atrasadas" e o segmento de envio
+     partem daqui para não contradizerem o indicador: sem isso, a conta que
+     aparece como "app atualizado" ainda recebia o aviso para atualizar. */
+  function accountsOnCurrentVersion() {
+    const code = appVersionReference().code;
+    const ids = new Set();
+    if (code <= 0) return ids;
+    (state.versions?.devices || []).forEach((device) => {
+      if (device.user_id && asNumber(device.app_version_code) >= code) ids.add(device.user_id);
+    });
+    return ids;
   }
 
   function versionOverview() {
@@ -1409,8 +1431,12 @@
     const adoption = pct(view.current.length, view.devices.length);
     const release = view.release;
     const maximum = Math.max(1, ...view.groups.map((group) => group.count));
+    const upToDate = accountsOnCurrentVersion();
     const lateAccounts = new Map();
     view.outdated.forEach((item) => {
+      // Aparelho atrasado de uma conta que já tem outro na versão atual: o
+      // aparelho conta como atrasado, a conta não.
+      if (item.user_id && upToDate.has(item.user_id)) return;
       const key = item.user_id || item.device_hash;
       const current = lateAccounts.get(key);
       if (!current || asNumber(item.app_version_code) < asNumber(current.app_version_code)) lateAccounts.set(key, item);
@@ -1419,7 +1445,7 @@
     return header + `${release ? `<section class="hero-status"><span class="hero-status-icon">${icon("package")}</span><div class="hero-status-copy"><span class="eyebrow">Release publicada</span><h3>${esc(release.version_name)} · código ${count(release.version_code)}</h3><p>Publicada em ${dateTime(release.released_at_ms)}${release.file_size_bytes ? ` · ${bytes(release.file_size_bytes)}` : ""}${release.mandatory ? " · atualização obrigatória" : ""}</p></div><div class="hero-status-actions">${apkUrl ? `<a class="button button--secondary button--compact" href="${esc(apkUrl)}" target="_blank" rel="noopener">${icon("external")} Abrir APK</a>` : ""}</div></section>` : `<div class="notice notice--warning">${icon("alert")}<span>Nenhuma release foi encontrada no catálogo.</span></div>`}
       <section class="metric-grid" style="margin-top:0.9375rem">${metricCard("Aparelhos reportados", count(view.devices.length), `${count(view.known.length)} com versão conhecida`, "blue", "device")}${metricCard("Na versão atual", `${adoption}%`, `${count(view.current.length)} aparelhos`, "green", "check-circle")}${metricCard("Atrasados", count(view.outdated.length), `${count(lateAccounts.size)} contas afetadas`, view.outdated.length ? "yellow" : "green", "alert")}${metricCard("Sem versão", count(view.unknown.length), "Build ainda não identificada", view.unknown.length ? "purple" : "blue", "package")}</section>
       <section class="content-grid content-grid--wide-left"><article class="panel"><div class="panel-head"><div><h3 class="section-title">Distribuição instalada</h3><p class="section-copy">Contas internas não participam deste cálculo</p></div></div><div class="version-list">${view.groups.map((group) => `<div class="version-row"><span class="version-name">${esc(group.name)} ${group.current ? '<span class="tag" style="margin-left:0.3125rem">atual</span>' : ""}</span><div class="bar-track"><div class="bar-fill" style="width:${group.count * 100 / maximum}%;--bar-color:${group.current ? "var(--green)" : group.code == null ? "var(--muted)" : "var(--yellow)"}"></div></div><span class="version-number">${count(group.count)}</span><span class="version-number">${pct(group.count, view.devices.length)}%</span></div>`).join("") || '<div class="notice"><span>Sem dispositivos com versão reportada.</span></div>'}</div></article>
-      <article class="panel"><div class="panel-head"><div><h3 class="section-title">Contas atrasadas</h3><p class="section-copy">Versão abaixo da release publicada</p></div></div><div class="activity-list">${[...lateAccounts.values()].sort((a, b) => asNumber(a.app_version_code) - asNumber(b.app_version_code)).slice(0, 12).map((item) => { const account = state.accounts.find((a) => a.userId === item.user_id); return `<button class="activity-item" ${account ? `data-open-user="${esc(account.key)}"` : ""}><span class="activity-icon">${icon("device")}</span><span class="activity-copy"><strong>${esc(item.user_email || item.device_name || "Sem identificação")}</strong><small>${esc(item.app_version_name || "desconhecida")} · ${relative(item.last_seen_ms)}</small></span><span class="tag">code ${count(item.app_version_code)}</span>${account ? icon("chevron-right") : ""}</button>`; }).join("") || '<div class="notice"><span>Todos os aparelhos conhecidos estão na versão atual.</span></div>'}</div></article></section>`;
+      <article class="panel"><div class="panel-head"><div><h3 class="section-title">Contas atrasadas</h3><p class="section-copy">Nenhum aparelho da conta na versão atual</p></div></div><div class="activity-list">${[...lateAccounts.values()].sort((a, b) => asNumber(a.app_version_code) - asNumber(b.app_version_code)).slice(0, 12).map((item) => { const account = state.accounts.find((a) => a.userId === item.user_id); return `<button class="activity-item" ${account ? `data-open-user="${esc(account.key)}"` : ""}><span class="activity-icon">${icon("device")}</span><span class="activity-copy"><strong>${esc(item.user_email || item.device_name || "Sem identificação")}</strong><small>${esc(item.app_version_name || "desconhecida")} · ${relative(item.last_seen_ms)}</small></span><span class="tag">code ${count(item.app_version_code)}</span>${account ? icon("chevron-right") : ""}</button>`; }).join("") || '<div class="notice"><span>Todas as contas têm um aparelho na versão atual.</span></div>'}</div></article></section>`;
   }
 
   /* Rastros de teste ----------------------------------------------------- */
@@ -1785,8 +1811,11 @@
      segmento fica indisponível em vez de devolver uma lista vazia mentirosa. */
   function outdatedUserIds() {
     if (!state.versions) return null;
+    const upToDate = accountsOnCurrentVersion();
     const ids = new Set();
-    versionOverview().outdated.forEach((item) => { if (item.user_id) ids.add(item.user_id); });
+    versionOverview().outdated.forEach((item) => {
+      if (item.user_id && !upToDate.has(item.user_id)) ids.add(item.user_id);
+    });
     return ids;
   }
 
