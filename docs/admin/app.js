@@ -14,6 +14,7 @@
     traces: { eyebrow: "Operação", title: "Rastros de teste", description: "Linha do tempo operacional dos participantes do programa de testes." },
     analytics: { eyebrow: "Produto", title: "Uso e adoção", description: "Alcance, estados das solicitações e comportamento dentro do produto." },
     versions: { eyebrow: "Produto", title: "Versões", description: "Release publicada, adoção instalada e contas que precisam atualizar." },
+    news: { eyebrow: "Produto", title: "Novidades", description: "Cards e janelas da seção Novidades da tela inicial do app." },
     services: { eyebrow: "Serviços", title: "Status dos serviços", description: "Disponibilidade e latência das dependências críticas do app." },
     whatsapp: { eyebrow: "Serviços", title: "WhatsApp", description: "Conexão da Evolution API e desempenho das verificações de telefone." },
     broadcast: { eyebrow: "Serviços", title: "Comunicados", description: "Envio controlado de mensagens para números verificados ou uma lista manual." }
@@ -39,6 +40,7 @@
     verification: null,
     traces: null,
     versions: null,
+    news: null,
     now: Date.now(),
     serverNow: null,
     lastUpdated: null,
@@ -517,6 +519,7 @@
         diagnostics: () => loadDiagnostics({ quiet: true }),
         analytics: () => loadStatistics({ quiet: true }),
         versions: () => loadVersions({ quiet: true }),
+        news: () => loadNews({ quiet: true }),
         traces: () => loadTraces({ quiet: true }),
         services: () => loadHealth({ quiet: true }),
         whatsapp: () => Promise.allSettled([loadWhatsapp({ quiet: true }), loadVerification({ quiet: true })]),
@@ -560,6 +563,7 @@
   function activatePageData(page) {
     if (["users", "versions"].includes(page) && !state.versions && !state.loading.versions) loadVersions();
     if (page === "traces" && !state.traces && !state.loading.traces) loadTraces();
+    if (page === "news" && !state.news && !state.loading.news) loadNews();
     if (page === "services") {
       if (!state.health && !state.loading.health) loadHealth();
       state.timers.health = setInterval(() => { if (state.page === "services") loadHealth({ quiet: true }); }, 15_000);
@@ -2199,6 +2203,397 @@
     }
   }
 
+  /* Novidades -------------------------------------------------------------
+     A seção Novidades da tela inicial do app. Cada linha de `app_news` é um
+     card na Home (imagem paisagem 4:3) que abre uma janela feita só da imagem
+     do guia (retrato 2:3). O app lê pela RPC get_app_news e guarda a última
+     lista, então o que se salva aqui chega na próxima abertura — em até 30
+     minutos — sem build novo. */
+  const NEWS_BUCKET = "news-media";
+  const NEWS_MAX_BYTES = 2 * 1024 * 1024;
+  const NEWS_TYPES = ["image/webp", "image/png", "image/jpeg"];
+  const NEWS_ACCENTS = [["verde", "Verde"], ["vermelho", "Vermelho"], ["azul", "Azul"], ["amarelo", "Amarelo"], ["roxo", "Roxo"]];
+  const NEWS_ICONS = [
+    ["anuncio", "Megafone"], ["grupo", "Grupo"], ["video", "Câmera de vídeo"], ["captura", "Captura de tela"],
+    ["qr", "QR code"], ["mapa", "Mapa"], ["estrela", "Estrela"], ["info", "Informação"], ["raio", "Raio"],
+    ["presente", "Presente"], ["carro", "Carro"], ["escudo", "Escudo"], ["dinheiro", "Dinheiro"], ["notificacao", "Notificação"]
+  ];
+  /* Imagens que o APK já leva, citadas como `res:<nome>`. Espelha
+     NovidadesCatalogo.IMAGENS_EMBUTIDAS: um nome fora dela o app ignora. As
+     cópias em ./assets servem só para a prévia deste painel. */
+  const NEWS_BUILTIN = {
+    card: [["novidade_whatsapp", "Grupo do WhatsApp"], ["novidade_1", "Gravação Secreta"], ["novidade_2", "Captura de Tela"], ["novidade_4", "QR Pix"]],
+    guide: [["guia_novidade_whatsapp", "Guia do grupo do WhatsApp"], ["guia_novidade_gravacao", "Guia da Gravação Secreta"], ["guia_novidade_captura", "Guia da Captura de Tela"], ["guia_novidade_pix", "Guia do QR Pix"]]
+  };
+  const NEWS_SLOTS = {
+    card: { field: "card_image", label: "Imagem do card", ratio: 4 / 3, ratioLabel: "4:3, paisagem", size: "1448 × 1086" },
+    guide: { field: "guide_image", label: "Imagem da janela", ratio: 2 / 3, ratioLabel: "2:3, retrato", size: "1024 × 1536" }
+  };
+  const NEWS_BLANK = {
+    id: "", active: true, min_app_version: 0, card_title: "", card_summary: "", card_image: "", accent: "verde",
+    icon: "anuncio", eyebrow: "Novidade", title: "", subtitle: "", guide_image: "", guide_description: "", body: "",
+    button_label: "", button_url: ""
+  };
+
+  function loadNews(options = {}) {
+    return loadResource("news", () => rpc("admin_list_news", {}), (result) => {
+      if (result.status !== "ok") throw new Error("Sem permissão para consultar as novidades.");
+      state.news = result.items || [];
+    }, options);
+  }
+
+  function newsFields(item) {
+    const fields = {};
+    Object.keys(NEWS_BLANK).forEach((key) => { fields[key] = item?.[key] ?? NEWS_BLANK[key]; });
+    return fields;
+  }
+
+  function newsImageUrl(value) {
+    const text = String(value || "");
+    if (text.startsWith("res:")) return `./assets/${encodeURIComponent(text.slice(4))}.webp`;
+    return safeHttpUrl(text);
+  }
+
+  function newsImageLabel(value) {
+    const text = String(value || "");
+    if (!text) return "Sem imagem";
+    if (!text.startsWith("res:")) return "Imagem enviada";
+    const name = text.slice(4);
+    const found = [...NEWS_BUILTIN.card, ...NEWS_BUILTIN.guide].find(([key]) => key === name);
+    return `Imagem do app · ${found ? found[1] : name}`;
+  }
+
+  function newsThumb(value, kind, alt) {
+    const url = newsImageUrl(value);
+    if (url) return `<img class="news-thumb news-thumb--${kind}" src="${esc(url)}" alt="${esc(alt)}" loading="lazy">`;
+    return `<span class="news-thumb news-thumb--${kind} news-thumb--empty">${icon("image")}<small>${kind === "card" ? "Card em texto" : "Janela em texto"}</small></span>`;
+  }
+
+  function renderNews() {
+    const newButton = `<button class="button button--primary" data-news-new>${icon("plus")} Nova novidade</button>`;
+    const header = pageHeading(
+      "Novidades do app",
+      "Os cards da seção Novidades da tela inicial e as janelas que eles abrem. O que você salvar aqui chega ao app na próxima abertura, em até 30 minutos, sem novo build.",
+      newButton
+    );
+    if (!state.news && state.loading.news) return header + loadingState("Carregando as novidades…");
+    if (state.errors.news && !state.news) return header + errorState(state.errors.news, "news");
+    const items = state.news || [];
+    const guide = `<div class="notice notice--info">${icon("sparkles")}<span>O <strong>card</strong> é uma imagem paisagem 4:3 (ideal 1448 × 1086) e a <strong>janela</strong> é só a imagem do guia, retrato 2:3 (ideal 1024 × 1536), com um X para fechar. O botão embaixo da imagem só aparece quando a novidade tem link. Até 12 novidades ativas aparecem, na ordem abaixo. Builds anteriores a este recurso continuam com a lista que já levam.</span></div>`;
+    if (!items.length) return header + guide + emptyState("Nenhuma novidade cadastrada", "Com a lista vazia, a seção Novidades não aparece no app.", "sparkles", newButton);
+    const active = items.filter((item) => item.active).length;
+    const rows = items.map((item, index) => {
+      const tags = [
+        pill(item.active ? "Ativa" : "Desligada", item.active ? "green" : "neutral"),
+        item.button_url ? `<span class="tag">Com link</span>` : "",
+        asNumber(item.min_app_version) > 0 ? `<span class="tag tag--warning">A partir do build ${esc(item.min_app_version)}</span>` : ""
+      ].join("");
+      return `<article class="news-row${item.active ? "" : " is-off"}">
+        <div class="news-order">
+          <button class="icon-button" data-news-move="${esc(item.id)}" data-dir="-1" aria-label="Subir"${index === 0 ? " disabled" : ""}>${icon("arrow-up")}</button>
+          <span>${index + 1}</span>
+          <button class="icon-button" data-news-move="${esc(item.id)}" data-dir="1" aria-label="Descer"${index === items.length - 1 ? " disabled" : ""}>${icon("arrow-down")}</button>
+        </div>
+        ${newsThumb(item.card_image, "card", item.card_title)}
+        ${newsThumb(item.guide_image, "guide", item.title)}
+        <div class="news-copy">
+          <strong>${esc(item.card_title)}</strong>
+          <small>${esc(item.id)} · atualizada ${esc(relative(item.updated_at_ms, Date.now()).toLowerCase())}</small>
+          <div class="tags">${tags}</div>
+        </div>
+        <div class="news-actions">
+          <button class="button button--secondary button--compact" data-news-edit="${esc(item.id)}">Editar</button>
+          <button class="button button--secondary button--compact" data-news-toggle="${esc(item.id)}">${item.active ? "Desligar" : "Ligar"}</button>
+          <button class="icon-button" data-news-delete="${esc(item.id)}" aria-label="Excluir novidade">${icon("trash")}</button>
+        </div>
+      </article>`;
+    }).join("");
+    return header + guide + `<section class="panel"><div class="panel-head"><div><h3 class="section-title">Pilha de novidades</h3><p class="section-copy">${plural(active, "ativa", "ativas")} de ${plural(items.length, "cadastrada", "cadastradas")} · a primeira fica no topo</p></div></div><div class="news-list">${rows}</div></section>`;
+  }
+
+  /* Editor --------------------------------------------------------------- */
+  function newsSlug(text) {
+    return String(text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
+  }
+
+  function uniqueNewsId(base) {
+    const taken = new Set((state.news || []).map((item) => item.id));
+    const root = /^[a-z0-9][a-z0-9_-]{1,39}$/.test(base) ? base : `novidade-${Date.now().toString(36)}`;
+    let candidate = root;
+    for (let n = 2; taken.has(candidate); n++) candidate = `${root}-${n}`;
+    return candidate;
+  }
+
+  function openNewsEditor(id = null) {
+    const original = id ? (state.news || []).find((item) => item.id === id) : null;
+    const item = newsFields(original);
+    /* Título da janela vazio = o do card, que é o que se quer em quase todo
+       caso. O campo aparece vazio (com o do card de dica) para que editar o
+       título do card não deixe o da janela para trás. */
+    if (item.title === item.card_title) item.title = "";
+    state.detail = { type: "news", isNew: !original, item, uploading: {}, saving: false, error: "" };
+    renderNewsEditor();
+    if (!els.detail.open) els.detail.showModal();
+  }
+
+  function newsField(name, label, value, { type = "text", placeholder = "", hint = "", maxlength = 200, required = false, textarea = false, readonly = false } = {}) {
+    const id = `news-${name}`;
+    const common = `id="${id}" data-news-field="${name}" maxlength="${maxlength}" placeholder="${esc(placeholder)}"${readonly ? " readonly" : ""}`;
+    const control = textarea
+      ? `<textarea ${common} rows="4">${esc(value)}</textarea>`
+      : `<input ${common} type="${type}" value="${esc(value)}">`;
+    return `<label class="field-label" for="${id}">${esc(label)}${required ? " *" : ""}</label>${control}${hint ? `<p class="field-hint">${esc(hint)}</p>` : ""}`;
+  }
+
+  function newsImagePicker(kind) {
+    const detail = state.detail;
+    const slot = NEWS_SLOTS[kind];
+    const value = detail.item[slot.field] || "";
+    const builtin = value.startsWith("res:") ? value.slice(4) : "";
+    const uploading = detail.uploading[kind];
+    const preview = uploading
+      ? `<span class="news-thumb news-thumb--${kind} news-thumb--empty">${icon("loader", "icon spin")}<small>Enviando…</small></span>`
+      : newsThumb(value, kind, slot.label);
+    return `<div class="news-picker news-picker--${kind}">
+      ${preview}
+      <div class="news-picker-copy">
+        <strong>${esc(slot.label)}</strong>
+        <small>${esc(newsImageLabel(value))} · ideal ${esc(slot.ratioLabel)}, ${esc(slot.size)} px, até 2 MB (WebP, PNG ou JPG)</small>
+        <div class="detail-actions">
+          <button class="button button--secondary button--compact" data-news-upload="${kind}"${uploading ? " disabled" : ""}>${icon("upload")} Enviar imagem</button>
+          <select class="toolbar-select" data-news-builtin="${kind}" aria-label="Usar uma imagem que já vem no app">
+            <option value="">Imagem do app…</option>
+            ${NEWS_BUILTIN[kind].map(([key, label]) => `<option value="${esc(key)}"${builtin === key ? " selected" : ""}>${esc(label)}</option>`).join("")}
+          </select>
+          ${value ? `<button class="button button--quiet button--compact" data-news-clear="${kind}">Remover</button>` : ""}
+        </div>
+        <input type="file" id="news-file-${kind}" data-news-file="${kind}" accept="image/webp,image/png,image/jpeg" hidden>
+      </div>
+    </div>`;
+  }
+
+  function renderNewsEditor() {
+    const detail = state.detail;
+    if (detail?.type !== "news") return;
+    const item = detail.item;
+    els.detailContent.innerHTML = `<header class="detail-top">
+      <button class="icon-button" data-close-detail aria-label="Fechar">${icon("x")}</button>
+      <div class="detail-top-copy"><span class="eyebrow">${detail.isNew ? "Nova novidade" : "Editar novidade"}</span><h2 id="detail-title">${esc(item.card_title || "Sem título")}</h2></div>
+      <button class="button button--primary button--compact" data-news-save${detail.saving ? " disabled" : ""}>${detail.saving ? `${icon("loader", "icon spin")} Salvando…` : `${icon("check")} Salvar`}</button>
+    </header>
+    <div class="detail-body">
+      ${detail.error ? `<div class="notice notice--danger">${icon("alert")}<span>${esc(detail.error)}</span></div>` : ""}
+      <section class="detail-section">
+        <h3>Card na tela inicial</h3>
+        ${newsImagePicker("card")}
+        ${newsField("card_title", "Título do card", item.card_title, { required: true, maxlength: 120, hint: "É o que o TalkBack lê no card. Sem imagem, o card mostra este título em texto." })}
+        ${newsField("card_summary", "Resumo", item.card_summary, { maxlength: 160, hint: "Opcional. Só aparece no card em texto, quando não há imagem." })}
+      </section>
+      <section class="detail-section">
+        <h3>Janela que o card abre</h3>
+        ${newsImagePicker("guide")}
+        ${newsField("guide_description", "Descrição da imagem", item.guide_description, { textarea: true, maxlength: 1200, hint: "O passo a passo da imagem em texto. O TalkBack lê isto, e a janela mostra este texto se a imagem não carregar." })}
+        ${newsField("button_url", "Link do botão", item.button_url, { type: "url", maxlength: 2048, placeholder: "https://…", hint: "Opcional, só https. Com link aparece um botão embaixo da imagem que o abre; sem link, a janela é só a imagem e o X." })}
+        ${newsField("button_label", "Texto do botão", item.button_label, { maxlength: 40, placeholder: item.button_url ? "Abrir" : "Entendi" })}
+      </section>
+      <section class="detail-section">
+        <h3>Publicação</h3>
+        <div class="news-form-grid">
+          <div><label class="field-label" for="news-accent">Cor de destaque</label><select id="news-accent" data-news-field="accent">${NEWS_ACCENTS.map(([key, label]) => `<option value="${key}"${item.accent === key ? " selected" : ""}>${label}</option>`).join("")}</select><p class="field-hint">Borda do card, cor do botão e da versão em texto.</p></div>
+          <div>${newsField("min_app_version", "Mostrar a partir do build", item.min_app_version, { type: "number", maxlength: 6, hint: "0 = todos. Use o versionCode para uma novidade que cita um recurso novo." })}</div>
+        </div>
+        <label class="news-check"><input type="checkbox" data-news-field="active"${item.active ? " checked" : ""}><span>Ativa — aparece no app</span></label>
+      </section>
+      <details class="detail-section news-more">
+        <summary><strong>Versão em texto e identificador</strong><small>Usada quando a novidade não tem imagem de janela, ou ela não carrega</small></summary>
+        ${newsField("title", "Título da janela", item.title, { maxlength: 80, placeholder: item.card_title, hint: "Também é o nome da janela para o TalkBack. Vazio, usa o título do card." })}
+        <div class="news-form-grid">
+          <div>${newsField("eyebrow", "Sobretítulo", item.eyebrow, { maxlength: 32, placeholder: "Novidade" })}</div>
+          <div><label class="field-label" for="news-icon">Ícone</label><select id="news-icon" data-news-field="icon">${NEWS_ICONS.map(([key, label]) => `<option value="${key}"${item.icon === key ? " selected" : ""}>${label}</option>`).join("")}</select></div>
+        </div>
+        ${newsField("subtitle", "Subtítulo", item.subtitle, { maxlength: 160 })}
+        ${newsField("body", "Texto", item.body, { textarea: true, maxlength: 1200, hint: "Opcional. Sem ele, a versão em texto usa a descrição da imagem." })}
+        ${newsField("id", "Identificador", item.id, { maxlength: 48, readonly: !detail.isNew, placeholder: newsSlug(item.card_title) || "gerado-do-titulo", hint: detail.isNew ? "Gerado do título. É por ele que o app lembra quem já abriu a novidade (selo NOVO); não muda depois de salvo." : "Fixo: é por ele que o app lembra quem já abriu a novidade." })}
+      </details>
+    </div>`;
+  }
+
+  function showNewsError(message) {
+    if (state.detail?.type !== "news") return;
+    state.detail.error = message;
+    renderNewsEditor();
+    els.detail.scrollTop = 0;
+  }
+
+  async function saveNews() {
+    const detail = state.detail;
+    if (detail?.type !== "news" || detail.saving) return;
+    const item = newsFields(detail.item);
+    Object.keys(item).forEach((key) => { if (typeof item[key] === "string") item[key] = item[key].trim(); });
+    if (!item.card_title) return showNewsError("Informe o título do card.");
+    if (item.button_url && !/^https:\/\/\S+$/i.test(item.button_url)) return showNewsError("O link precisa começar com https:// e não pode ter espaços.");
+    item.title = item.title || item.card_title;
+    item.button_label = item.button_label || (item.button_url ? "Abrir" : "Entendi");
+    item.min_app_version = Math.max(0, Math.floor(asNumber(item.min_app_version)));
+    if (detail.isNew) item.id = uniqueNewsId(newsSlug(item.id || item.card_title));
+
+    detail.saving = true; detail.error = ""; renderNewsEditor();
+    try {
+      const result = await rpc("admin_upsert_news", { p_item: item });
+      if (result.status === "forbidden") throw new Error("Sem permissão para salvar novidades.");
+      if (result.status !== "ok") throw new Error(result.message || "O servidor recusou a novidade.");
+      toast(detail.isNew ? "Novidade criada" : "Novidade salva", "success", "Chega ao app na próxima abertura, em até 30 minutos.");
+      if (state.detail === detail) els.detail.close();
+      await loadNews({ quiet: true });
+    } catch (error) {
+      detail.saving = false;
+      if (state.detail === detail) showNewsError(error.message);
+    }
+  }
+
+  function imageRatio(file) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const image = new Image();
+      image.onload = () => { URL.revokeObjectURL(url); resolve(image.naturalHeight ? image.naturalWidth / image.naturalHeight : null); };
+      image.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+      image.src = url;
+    });
+  }
+
+  /* Mesmo caminho dos anexos dos comunicados: sobe uma vez para o bucket e a
+     linha guarda só a URL pública. Nome único por envio — trocar a imagem
+     gera outra URL, e o cache do app nunca serve a antiga no lugar da nova. */
+  async function uploadNewsImage(kind, file) {
+    const detail = state.detail;
+    if (detail?.type !== "news") return;
+    const slot = NEWS_SLOTS[kind];
+    if (!NEWS_TYPES.includes(file.type)) return toast("Formato não aceito", "error", "Use WebP, PNG ou JPG.");
+    if (file.size > NEWS_MAX_BYTES) return toast("Imagem grande demais", "error", `O limite é ${bytes(NEWS_MAX_BYTES)}.`);
+    const ratio = await imageRatio(file);
+    detail.uploading[kind] = true; renderNewsEditor();
+    try {
+      if (!state.session?.accessToken) throw new Error("Sessão administrativa ausente.");
+      if (state.session.expiresAt && state.session.expiresAt - Date.now() < 30_000 && state.session.refreshToken) {
+        await refreshSession();
+      }
+      const limpo = file.name.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9._-]/g, "-").slice(-60);
+      const caminho = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${limpo}`;
+      const response = await fetch(`${SUPABASE_URL}/storage/v1/object/${NEWS_BUCKET}/${encodeURIComponent(caminho)}`, {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${state.session.accessToken}`,
+          "Content-Type": file.type,
+          "Cache-Control": "31536000",
+          "x-upsert": "false"
+        },
+        body: file
+      });
+      if (!response.ok) {
+        const detalhe = await response.json().catch(() => ({}));
+        throw new Error(detalhe.message || detalhe.error || `O servidor recusou a imagem (${response.status}).`);
+      }
+      detail.item[slot.field] = `${SUPABASE_URL}/storage/v1/object/public/${NEWS_BUCKET}/${encodeURIComponent(caminho)}`;
+      if (ratio && Math.abs(ratio - slot.ratio) / slot.ratio > 0.06) {
+        toast("Proporção diferente da ideal", "error", kind === "card"
+          ? `O card é ${slot.ratioLabel}: as bordas da imagem serão cortadas.`
+          : `A janela se ajusta à imagem, mas o ideal é ${slot.ratioLabel}.`);
+      } else {
+        toast("Imagem enviada", "success", "Salve a novidade para publicar.");
+      }
+    } catch (error) {
+      toast("Não foi possível enviar a imagem", "error", error.message);
+    } finally {
+      detail.uploading[kind] = false;
+      if (state.detail === detail) renderNewsEditor();
+    }
+  }
+
+  /* Ações da lista ------------------------------------------------------- */
+  async function toggleNews(id) {
+    const item = (state.news || []).find((row) => row.id === id);
+    if (!item) return;
+    try {
+      const result = await rpc("admin_upsert_news", { p_item: { ...newsFields(item), active: !item.active } });
+      if (result.status !== "ok") throw new Error(result.message || "O servidor recusou a alteração.");
+      toast(item.active ? "Novidade desligada" : "Novidade ligada", "success", "Chega ao app na próxima abertura.");
+      await loadNews({ quiet: true });
+    } catch (error) { toast("Não foi possível alterar", "error", error.message); }
+  }
+
+  async function moveNews(id, direction) {
+    const ids = (state.news || []).map((row) => row.id);
+    const from = ids.indexOf(id);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    /* Troca na tela antes da resposta; a recarga do fim corrige se falhar. */
+    state.news = ids.map((key) => state.news.find((row) => row.id === key));
+    renderCurrentPage();
+    try {
+      const result = await rpc("admin_reorder_news", { p_ids: ids });
+      if (result.status !== "ok") throw new Error("O servidor recusou a nova ordem.");
+    } catch (error) { toast("Não foi possível reordenar", "error", error.message); }
+    finally { loadNews({ quiet: true }); }
+  }
+
+  function newsMediaPath(url) {
+    const prefix = `${SUPABASE_URL}/storage/v1/object/public/${NEWS_BUCKET}/`;
+    const text = String(url || "");
+    return text.startsWith(prefix) ? decodeURIComponent(text.slice(prefix.length)) : null;
+  }
+
+  async function deleteNews(id) {
+    const item = (state.news || []).find((row) => row.id === id);
+    if (!item) return;
+    if (!await askConfirm({
+      title: "Excluir esta novidade?",
+      message: `“${item.card_title}” sai do app na próxima abertura. Para só tirar do ar e manter o conteúdo, use Desligar.`,
+      label: "Excluir novidade",
+      danger: true
+    })) return;
+    try {
+      const result = await rpc("admin_delete_news", { p_id: id });
+      if (result.status !== "ok") throw new Error("O servidor recusou a exclusão.");
+      toast("Novidade excluída");
+      /* Melhor esforço: apaga do bucket as imagens que nenhuma outra novidade
+         usa. Se falhar, o arquivo fica órfão, mas ninguém mais o baixa. */
+      const others = (state.news || []).filter((row) => row.id !== id);
+      [item.card_image, item.guide_image].forEach((url) => {
+        const path = newsMediaPath(url);
+        if (!path || others.some((row) => row.card_image === url || row.guide_image === url)) return;
+        fetch(`${SUPABASE_URL}/storage/v1/object/${NEWS_BUCKET}/${encodeURIComponent(path)}`, {
+          method: "DELETE",
+          headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${state.session?.accessToken}` }
+        }).catch(() => {});
+      });
+      await loadNews({ quiet: true });
+    } catch (error) { toast("Não foi possível excluir", "error", error.message); }
+  }
+
+  /* Campos do editor: guardados no estado a cada tecla, sem redesenhar o
+     formulário (redesenhar tiraria o foco do campo). */
+  function onNewsInput(target) {
+    const detail = state.detail;
+    const field = target.dataset.newsField;
+    if (detail?.type !== "news" || !field) return;
+    detail.item[field] = target.type === "checkbox" ? target.checked : target.value;
+    if (field === "card_title") {
+      const heading = $("detail-title");
+      if (heading) heading.textContent = target.value || "Sem título";
+      const title = $("news-title");
+      if (title) title.placeholder = target.value;
+      const id = $("news-id");
+      if (detail.isNew && id) id.placeholder = newsSlug(target.value) || "gerado-do-titulo";
+    }
+    if (field === "button_url") {
+      const label = $("news-button_label");
+      if (label) label.placeholder = target.value.trim() ? "Abrir" : "Entendi";
+    }
+  }
+
   /* Confirmações --------------------------------------------------------- */
   function askConfirm({ title, message, label = "Confirmar", danger = false, extra = "" }) {
     $("confirm-title").textContent = title;
@@ -2247,7 +2642,7 @@
   /* Renderização e eventos ---------------------------------------------- */
   function renderCurrentPage() {
     if (els.app.hidden) return;
-    const renderers = { overview: renderOverview, users: renderUsers, diagnostics: renderDiagnostics, traces: renderTraces, analytics: renderAnalytics, versions: renderVersions, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
+    const renderers = { overview: renderOverview, users: renderUsers, diagnostics: renderDiagnostics, traces: renderTraces, analytics: renderAnalytics, versions: renderVersions, news: renderNews, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
     els.page.innerHTML = renderers[state.page]?.() || "";
     if (state.page === "broadcast") {
       growComposer($("broadcast-message"));
@@ -2262,7 +2657,7 @@
   }
 
   function retryResource(resource) {
-    const loaders = { devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, traces: loadTraces, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
+    const loaders = { devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, traces: loadTraces, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
     loaders[resource]?.();
   }
 
@@ -2298,6 +2693,11 @@
     if (target.hasAttribute("data-attach-media")) return $("broadcast-file")?.click();
     if (target.hasAttribute("data-remove-media")) return removeBroadcastMedia();
     if (target.dataset.refreshResource) return retryResource(target.dataset.refreshResource);
+    if (target.hasAttribute("data-news-new")) return openNewsEditor();
+    if (target.dataset.newsEdit) return openNewsEditor(target.dataset.newsEdit);
+    if (target.dataset.newsToggle) return toggleNews(target.dataset.newsToggle);
+    if (target.dataset.newsMove) return moveNews(target.dataset.newsMove, asNumber(target.dataset.dir));
+    if (target.dataset.newsDelete) return deleteNews(target.dataset.newsDelete);
     if (target.hasAttribute("data-download-broadcast-failures")) {
       const failures = state.broadcast.results.filter((item) => item.status !== "sent").map((item) => `${item.phone}\t${item.error || item.status}`).join("\n");
       return downloadText("gain-comunicado-falhas.txt", failures);
@@ -2386,6 +2786,12 @@
     const target = event.target.closest("button");
     if (!target) return;
     if (target.hasAttribute("data-close-detail")) return els.detail.close();
+    if (target.hasAttribute("data-news-save")) return saveNews();
+    if (target.dataset.newsUpload) return $(`news-file-${target.dataset.newsUpload}`)?.click();
+    if (target.dataset.newsClear && state.detail?.type === "news") {
+      state.detail.item[NEWS_SLOTS[target.dataset.newsClear].field] = "";
+      return renderNewsEditor();
+    }
     if (target.dataset.openUser) return openUser(target.dataset.openUser);
     if (target.dataset.userTab) {
       state.detailTab = target.dataset.userTab;
@@ -2416,7 +2822,21 @@
     }
   });
 
+  els.detailContent.addEventListener("input", (event) => onNewsInput(event.target));
+
   els.detailContent.addEventListener("change", (event) => {
+    if (event.target.dataset.newsFile) {
+      const file = event.target.files?.[0];
+      const kind = event.target.dataset.newsFile;
+      event.target.value = "";
+      if (file) uploadNewsImage(kind, file);
+      return;
+    }
+    if (event.target.dataset.newsBuiltin && state.detail?.type === "news") {
+      if (event.target.value) state.detail.item[NEWS_SLOTS[event.target.dataset.newsBuiltin].field] = `res:${event.target.value}`;
+      return renderNewsEditor();
+    }
+    if (event.target.dataset.newsField) return onNewsInput(event.target);
     if (event.target.id === "trace-detail-hours" && state.detail?.type === "trace") openTrace(state.detail.userId, asNumber(event.target.value, 24));
     if (event.target.id === "user-trace-hours") {
       const account = findAccount(state.detail?.key); const store = detailStore(account);
