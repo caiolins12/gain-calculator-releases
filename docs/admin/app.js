@@ -3195,7 +3195,7 @@
     if (!ai.events.length) return emptyState("Nenhuma atividade registrada", "Conversas e ações aparecem aqui quando o assistente começar a ser usado.", "activity");
     if (!events.length) return emptyState("Nada neste filtro", "Nenhum evento recente corresponde ao filtro escolhido.", "filter");
     const statuses = { pending: ["Em andamento", "yellow"], completed: ["Concluída", "green"], failed: ["Falha", "red"], applied: ["Aplicada", "green"], rejected: ["Recusada", "neutral"] };
-    const actions = { update_settings: "Ajuste de configurações", create_entry: "Novo lançamento", update_entry: "Correção de lançamento", delete_entry: "Lançamento para a lixeira" };
+    const actions = { update_settings: "Ajuste de configurações", create_entry: "Novo lançamento", update_entry: "Correção de lançamento", delete_entry: "Lançamento para a lixeira", app_command: "Comando do app" };
     return `<ul class="ai-event-list">${events.map((event) => {
       const status = statuses[event.status] || ["Desconhecido", "neutral"];
       const isAction = event.event_type === "action";
