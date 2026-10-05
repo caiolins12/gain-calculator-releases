@@ -15,7 +15,7 @@
     analytics: { eyebrow: "Produto", title: "Uso e adoção", description: "Alcance, estados das solicitações e comportamento dentro do produto." },
     versions: { eyebrow: "Produto", title: "Versões", description: "Release publicada, adoção instalada e contas que precisam atualizar." },
     news: { eyebrow: "Produto", title: "Novidades", description: "Cards e janelas da seção Novidades da tela inicial do app." },
-    assistant: { eyebrow: "Produto", title: "Assistente IA", description: "Controle o comportamento, acompanhe o uso e gerencie as ações do assistente." },
+    assistant: { eyebrow: "Produto", title: "Assistente IA", description: "Modelo, gasto com a OpenAI, experiência no app e uso por conta." },
     services: { eyebrow: "Serviços", title: "Status dos serviços", description: "Disponibilidade e latência das dependências críticas do app." },
     whatsapp: { eyebrow: "Serviços", title: "WhatsApp", description: "Conexão da Evolution API e desempenho das verificações de telefone." },
     broadcast: { eyebrow: "Serviços", title: "Comunicados", description: "Envio controlado de mensagens para números verificados ou uma lista manual." }
@@ -42,7 +42,7 @@
     traces: null,
     versions: null,
     news: null,
-    ai: { config: null, draft: null, dirty: false, saving: false, tab: "config", days: 30, metrics: null, events: null, health: null, provider: null, providerSaving: false, providerError: "", saveError: "", savedAt: null },
+    ai: { config: null, draft: null, dirty: false, saving: false, tab: "overview", days: 30, chart: "cost", eventFilter: "all", metrics: null, events: null, models: null, available: null, probes: {}, fx: null, fxLoading: false, health: null, provider: null, providerSaving: false, providerError: "", saveError: "", savedAt: null },
     now: Date.now(),
     serverNow: null,
     lastUpdated: null,
@@ -517,7 +517,7 @@
     try {
       if (state.page === "assistant") {
         await loadAiAssistant({ quiet: true });
-        if (["aiConfig", "aiMetrics", "aiEvents", "aiProvider"].some((name) => state.errors[name])) return toast("Atualização incompleta", "error", "Confira os avisos do assistente. Suas alterações foram preservadas.");
+        if (["aiConfig", "aiMetrics", "aiEvents", "aiProvider", "aiModels"].some((name) => state.errors[name])) return toast("Atualização incompleta", "error", "Confira os avisos do assistente. Suas alterações foram preservadas.");
         return toast("Assistente atualizado", "success", state.ai.dirty ? "Suas alterações em edição foram preservadas." : "Configuração e monitoramento sincronizados.");
       }
       const loaders = {
@@ -546,12 +546,20 @@
     return PAGES[value] ? value : "overview";
   }
 
+  /* Abas do assistente moram no endereço (#/assistant/model) para o link e o
+     recarregar voltarem à mesma aba. */
+  function aiTabFromHash() {
+    const [page, tab] = location.hash.replace(/^#\/?/, "").split("/");
+    return page === "assistant" && AI_TAB_IDS.includes(tab) ? tab : null;
+  }
+
   function setPage(page, { updateHistory = true } = {}) {
     if (!PAGES[page]) page = "overview";
     state.page = page;
     state.detail = null;
     stopPageTimers();
-    if (updateHistory) history.replaceState(null, "", `${location.pathname}${location.search}#/${page}`);
+    if (page === "assistant") state.ai.tab = aiTabFromHash() || state.ai.tab;
+    if (updateHistory || page === "assistant") history.replaceState(null, "", `${location.pathname}${location.search}#/${page}${page === "assistant" ? `/${state.ai.tab}` : ""}`);
     const meta = PAGES[page];
     $("page-eyebrow").textContent = meta.eyebrow;
     $("page-title").textContent = meta.title;
@@ -571,7 +579,10 @@
     if (["users", "versions"].includes(page) && !state.versions && !state.loading.versions) loadVersions();
     if (page === "traces" && !state.traces && !state.loading.traces) loadTraces();
     if (page === "news" && !state.news && !state.loading.news) loadNews();
-    if (page === "assistant" && !state.ai.config && !state.loading.aiConfig) loadAiAssistant();
+    if (page === "assistant") {
+      if (!state.ai.config && !state.loading.aiConfig) loadAiAssistant();
+      activateAiTab();
+    }
     if (page === "services") {
       if (!state.health && !state.loading.health) loadHealth();
       state.timers.health = setInterval(() => { if (state.page === "services") loadHealth({ quiet: true }); }, 15_000);
@@ -2632,10 +2643,44 @@
   }
 
   /* Assistente IA -------------------------------------------------------- */
+  const AI_TABS = [
+    ["overview", "Visão geral", "gauge"],
+    ["model", "Modelo e custos", "cpu"],
+    ["experience", "Experiência", "message"],
+    ["activity", "Atividade", "activity"],
+    ["connection", "Conexão", "key"]
+  ];
+  const AI_TAB_IDS = AI_TABS.map(([id]) => id);
+  const AI_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/gain-assistant`;
+  /* Perfil usado quando ainda não há conversas suficientes para medir: um
+     contexto típico do app (~9 mil tokens) e uma resposta curta. */
+  const AI_DEFAULT_PROFILE = { input: 9000, cached: 0, output: 300 };
+  const AI_FAILURES = {
+    provider_quota: "Sem crédito na OpenAI",
+    provider_auth: "Chave recusada pela OpenAI",
+    provider_rate_limited: "Limite de requisições da OpenAI",
+    provider_model: "Modelo indisponível na chave",
+    provider_request: "Parâmetro recusado pelo modelo",
+    provider_unavailable: "OpenAI indisponível",
+    provider_timeout: "Tempo de resposta esgotado",
+    invalid_response: "Resposta inválida do modelo",
+    server_error: "Erro no servidor",
+    setup_required: "Chave não cadastrada",
+    unsupported_model: "Modelo fora do catálogo",
+    budget_exceeded: "Orçamento do mês esgotado"
+  };
+  const AI_COST_STATUS = {
+    estimated: ["Estimado", "green"], legacy_estimate: ["Estimativa antiga", "neutral"], incomplete: ["Parcial", "yellow"],
+    unpriced: ["Sem tarifa", "yellow"], pending: ["Em andamento", "blue"]
+  };
+
   function aiResponse(result) {
     if (!result || result.success === false || (result.status && result.status !== "ok")) {
       const code = result?.error || result?.message;
-      throw new Error(code === "forbidden" ? "Sua conta não tem permissão para gerenciar o assistente." : code === "invalid_config" ? "A configuração foi recusada. Confira os limites dos campos." : code || "O servidor não retornou uma resposta válida.");
+      throw new Error(code === "forbidden" ? "Sua conta não tem permissão para gerenciar o assistente."
+        : code === "invalid_config" ? "A configuração foi recusada. Confira os limites dos campos."
+        : code === "unsupported_model" ? "Esse modelo não está no catálogo compatível com o assistente."
+        : code || "O servidor não retornou uma resposta válida.");
     }
     return result;
   }
@@ -2643,19 +2688,106 @@
   function aiError(message) {
     const text = String(message || "Não foi possível consultar o servidor.");
     return /PGRST202|schema cache|Could not find.*function|does not exist/i.test(text)
-      ? "O módulo de IA ainda não está disponível no servidor. Aplique a migração e publique a função gain-assistant para habilitar esta seção."
+      ? "Esta parte do assistente ainda não está no servidor. Aplique a migração mais recente e publique a função gain-assistant."
       : text;
+  }
+
+  function aiFailure(code) { return AI_FAILURES[code] || "Falha não identificada"; }
+
+  /* Valores em dólar: custos por conversa são frações de centavo, então
+     abaixo de US$ 0,01 mostramos dois dígitos significativos. */
+  function moneyDigits(size) {
+    return size === 0 || size >= 1 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+      : size < 0.01 ? { minimumSignificantDigits: 2, maximumSignificantDigits: 2 }
+      : { minimumFractionDigits: 2, maximumFractionDigits: 3 };
+  }
+
+  function usd(value) {
+    if (value == null || value === "" || !Number.isFinite(Number(value))) return "—";
+    const amount = Number(value);
+    return amount.toLocaleString("pt-BR", { style: "currency", currency: "USD", ...moneyDigits(Math.abs(amount)) });
+  }
+
+  function brl(valueUsd) {
+    const rate = state.ai.fx?.rate;
+    if (!rate || valueUsd == null || valueUsd === "" || !Number.isFinite(Number(valueUsd))) return "";
+    const amount = Number(valueUsd) * rate;
+    return `≈ ${amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL", ...moneyDigits(Math.abs(amount)) })}`;
+  }
+
+  function compactTokens(value) {
+    const amount = asNumber(value);
+    if (amount >= 1e6) return `${(amount / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mi`;
+    if (amount >= 1e3) return `${(amount / 1e3).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil`;
+    return count(amount);
+  }
+
+  function aiTime(value) {
+    const timestamp = typeof value === "number" ? value : Date.parse(value);
+    return Number.isFinite(timestamp) ? dateTime(timestamp) : "—";
+  }
+
+  function aiDate(value) {
+    return value ? dateOnly(Date.parse(`${String(value).slice(0, 10)}T12:00:00Z`)) : "—";
+  }
+
+  function aiMetric(name, suffix = "") {
+    const value = state.ai.metrics?.[name];
+    return value != null && Number.isFinite(Number(value)) ? `${count(value)}${suffix}` : "—";
+  }
+
+  function aiNotice(message, tone = "warning", retry = "") {
+    return `<div class="ai-notice ai-notice--${tone}" role="${tone === "error" ? "alert" : "status"}">${icon(tone === "error" ? "alert" : tone === "info" ? "info" : "shield")}<div>${esc(message)}</div>${retry ? `<button type="button" class="button button--secondary button--compact" data-ai-retry="${esc(retry)}">Tentar novamente</button>` : ""}</div>`;
+  }
+
+  function aiModelInfo(model) {
+    return (state.ai.models?.items || []).find((item) => item.model === model) || null;
+  }
+
+  function aiAccountLabel(userId) {
+    const id = String(userId || "");
+    const account = (state.accounts || []).find((item) => item.userId === id);
+    const top = (state.ai.metrics?.top_users || []).find((item) => item.user_id === id);
+    return account?.email || top?.email || (id ? `Conta ${id.slice(0, 8)}` : "Conta desconhecida");
+  }
+
+  /* Perfil de uso das conversas reais (30 dias) para estimar o custo de cada
+     modelo; sem amostra suficiente, usa o perfil padrão e avisa. */
+  function aiProfile() {
+    const profile = state.ai.models?.usage_profile || {};
+    const sample = asNumber(profile.sample_requests);
+    const requests30 = asNumber(profile.requests_30d);
+    if (sample >= 1 && asNumber(profile.avg_input_tokens) > 0) {
+      return { input: asNumber(profile.avg_input_tokens), cached: asNumber(profile.avg_cached_input_tokens), output: asNumber(profile.avg_output_tokens), measured: true, sample, requests30 };
+    }
+    return { ...AI_DEFAULT_PROFILE, measured: false, sample, requests30 };
+  }
+
+  /* A parte do prompt que não veio do cache é cobrada como escrita de cache
+     nos modelos que têm essa tarifa (1,25× a entrada): estimativa conservadora. */
+  function aiEstimate(model, profile) {
+    const input = asNumber(model.input_usd_per_million), cachedRate = asNumber(model.cached_input_usd_per_million);
+    const write = model.cache_write_usd_per_million == null ? input : asNumber(model.cache_write_usd_per_million);
+    const cached = Math.min(profile.cached, profile.input);
+    return ((profile.input - cached) * write + cached * cachedRate + profile.output * asNumber(model.output_usd_per_million)) / 1e6;
   }
 
   function aiDraft(config) {
     return {
       enabled: config.enabled === true, allow_mutations: config.allow_mutations === true,
-      model: String(config.model || "gpt-5-mini"), daily_message_limit: String(config.daily_message_limit ?? 30),
+      model: String(config.model || "gpt-6-luna"), daily_message_limit: String(config.daily_message_limit ?? 30),
       instructions: String(config.instructions || ""), welcome_message: String(config.welcome_message || ""),
-      suggestions_text: (Array.isArray(config.suggestions) ? config.suggestions : []).map(String).join("\n")
+      suggestions_text: (Array.isArray(config.suggestions) ? config.suggestions : []).map(String).join("\n"),
+      monthly_budget_usd: config.monthly_budget_usd == null ? "" : String(Number(config.monthly_budget_usd)).replace(".", ","),
+      budget_hard_limit: config.budget_hard_limit === true
     };
   }
 
+  function aiFunction(body) {
+    return requestJson(AI_FUNCTION_URL, { method: "POST", body: JSON.stringify(body) });
+  }
+
+  /* Carregamento ----------------------------------------------------------- */
   function loadAiConfig(options = {}) {
     if (state.ai.saving) return Promise.resolve(null);
     return loadResource("aiConfig", () => rpc("admin_get_ai_assistant_config"), (result) => {
@@ -2670,21 +2802,25 @@
     const days = state.ai.days;
     return loadResource("aiMetrics", () => rpc("admin_ai_assistant_metrics", { p_days: days }), (result) => {
       const metrics = aiResponse(result);
-      if (!Number.isFinite(Number(metrics.total_requests)) || metrics.total_requests == null) throw new Error("O servidor não retornou indicadores válidos.");
+      if (metrics.total_requests == null || !Number.isFinite(Number(metrics.total_requests))) throw new Error("O servidor não retornou indicadores válidos.");
       state.ai.metrics = metrics;
     }, options);
   }
 
   function loadAiEvents(options = {}) {
-    return loadResource("aiEvents", () => rpc("admin_list_ai_assistant_events", { p_limit: 50 }), (result) => {
+    return loadResource("aiEvents", () => rpc("admin_list_ai_assistant_events", { p_limit: 100 }), (result) => {
       const events = aiResponse(result).items;
       if (!Array.isArray(events)) throw new Error("O servidor não retornou o registro de atividade.");
       state.ai.events = events;
     }, options);
   }
 
-  function loadAiAssistant(options = {}) {
-    return Promise.allSettled([loadAiConfig(options), loadAiMetrics(options), loadAiEvents(options), loadAiProvider(options)]);
+  function loadAiModels(options = {}) {
+    return loadResource("aiModels", () => rpc("admin_ai_assistant_models"), (result) => {
+      const models = aiResponse(result);
+      if (!Array.isArray(models.items)) throw new Error("O servidor não retornou o catálogo de modelos.");
+      state.ai.models = models;
+    }, options);
   }
 
   function loadAiProvider(options = {}) {
@@ -2696,15 +2832,404 @@
     }, options);
   }
 
+  function loadAiHealth(options = {}) {
+    return loadResource("aiHealth", () => aiFunction({ operation: "config" }), (result) => {
+      if (typeof result?.provider_ready !== "boolean") throw new Error("A função respondeu sem informar a disponibilidade da chave. Confira a versão publicada no servidor.");
+      state.ai.health = { providerReady: result.provider_ready, checkedAt: Date.now() };
+    }, options);
+  }
+
+  /* Lista os modelos que a chave cadastrada enxerga (GET /v1/models). Não
+     gera custo e não consome a cota de nenhum usuário. */
+  function loadAiAvailability(options = {}) {
+    return loadResource("aiAvailable", async () => {
+      try { return await aiFunction({ operation: "admin_models" }); }
+      catch (error) {
+        if (error?.status === 400) throw new Error("A função publicada ainda não tem a verificação de modelos. Publique a versão mais recente da gain-assistant.");
+        throw error;
+      }
+    }, (result) => {
+      if (typeof result?.ok !== "boolean") throw new Error("A verificação de modelos não retornou um resultado válido.");
+      state.ai.available = { ok: result.ok, error: result.error || "", models: Array.isArray(result.models) ? result.models.map(String) : [], checkedAt: Date.now(), latency: asNumber(result.latency_ms) };
+    }, options);
+  }
+
+  /* Uma chamada mínima no formato real da conversa (ferramenta + saída
+     estruturada). Custa frações de centavo e confirma crédito e acesso. */
+  async function probeAiModel(model) {
+    const probes = state.ai.probes;
+    if (probes[model]?.loading) return;
+    probes[model] = { loading: true };
+    renderCurrentPage();
+    try {
+      const result = await aiFunction({ operation: "admin_probe", model });
+      probes[model] = { ...result, at: Date.now() };
+      if (result.ok) toast(`${aiModelInfo(model)?.label || model} respondeu`, "success", `Resposta em ${(asNumber(result.latency_ms) / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s${result.structured_output ? ", no formato do assistente" : ""}.`);
+      else toast("O modelo não respondeu", "error", aiFailure(result.error));
+    } catch (error) {
+      probes[model] = { ok: false, error: error?.status === 400 ? "outdated_function" : "", message: error?.status === 400 ? "Publique a versão mais recente da função gain-assistant." : aiError(error?.message), at: Date.now() };
+      toast("Não foi possível testar o modelo", "error", probes[model].message);
+    } finally { renderCurrentPage(); }
+  }
+
+  /* Cotação do dólar só para exibição. Sem resposta, o painel mostra apenas US$. */
+  async function loadAiFx() {
+    if (state.ai.fx || state.ai.fxLoading) return;
+    try {
+      const cached = JSON.parse(sessionStorage.getItem("gain_admin_usd_brl") || "null");
+      if (cached && Date.now() - cached.at < 6 * 3_600_000 && cached.rate > 0) { state.ai.fx = cached; return; }
+    } catch { /* armazenamento indisponível */ }
+    state.ai.fxLoading = true;
+    try {
+      const response = await fetch("https://economia.awesomeapi.com.br/json/last/USD-BRL", { signal: AbortSignal.timeout(8000) });
+      const rate = Number((await response.json())?.USDBRL?.bid);
+      if (response.ok && rate > 1 && rate < 50) {
+        state.ai.fx = { rate, at: Date.now() };
+        try { sessionStorage.setItem("gain_admin_usd_brl", JSON.stringify(state.ai.fx)); } catch { /* sem cache */ }
+        if (state.page === "assistant") renderCurrentPage();
+      }
+    } catch { /* sem cotação */ } finally { state.ai.fxLoading = false; }
+  }
+
+  function loadAiAssistant(options = {}) {
+    loadAiFx();
+    return Promise.allSettled([loadAiConfig(options), loadAiMetrics(options), loadAiEvents(options), loadAiProvider(options), loadAiModels(options)]);
+  }
+
+  function setAiTab(tab, focus = false) {
+    if (!AI_TAB_IDS.includes(tab)) return;
+    state.ai.tab = tab;
+    if (state.page === "assistant") history.replaceState(null, "", `${location.pathname}${location.search}#/assistant/${tab}`);
+    renderCurrentPage();
+    if (focus) $(`ai-tab-${tab}`)?.focus({ preventScroll: true });
+    activateAiTab();
+  }
+
+  /* Checagens gratuitas que alimentam os selos de disponibilidade. */
+  function activateAiTab() {
+    const tab = state.ai.tab;
+    if (["model", "connection"].includes(tab) && !state.ai.available && !state.loading.aiAvailable && !state.errors.aiAvailable) loadAiAvailability({ quiet: true });
+    if (tab === "connection" && !state.ai.health && !state.loading.aiHealth && !state.errors.aiHealth) loadAiHealth({ quiet: true });
+  }
+
+  /* Cabeçalho e alertas ---------------------------------------------------- */
+  function renderAiHero() {
+    const { config, provider, metrics } = state.ai;
+    const model = aiModelInfo(config?.model);
+    const month = metrics?.month;
+    const last4 = /^[a-zA-Z0-9_-]{1,4}$/.test(provider?.key_last4 || "") ? provider.key_last4 : "";
+    const status = config ? pill(config.enabled ? "Ativo no app" : "Desativado no app", config.enabled ? "green" : "neutral")
+      : pill(state.loading.aiConfig ? "Carregando" : "Servidor pendente", "yellow");
+    return `<section class="ai-hero"><div class="ai-hero-mark">${icon("sparkles")}</div>
+      <div class="ai-hero-copy"><span class="eyebrow">Assistente no app</span><h2>Gain Assistente</h2><p>Escolha o modelo, acompanhe o gasto com a OpenAI e veja como cada conta usa o assistente.</p></div>
+      <dl class="ai-hero-facts">
+        <div><dt>Situação</dt><dd>${status}</dd></div>
+        <div><dt>Modelo</dt><dd>${esc(model?.label || config?.model || "—")}</dd></div>
+        <div><dt>Chave</dt><dd>${provider ? (provider.configured ? `<span class="ai-masked-key">•••• ${esc(last4)}</span>` : pill("Pendente", "yellow")) : "—"}</dd></div>
+        <div><dt>Gasto no mês</dt><dd>${month ? `${esc(usd(month.month_cost_usd))}${brl(month.month_cost_usd) ? `<small>${esc(brl(month.month_cost_usd))}</small>` : ""}` : "—"}</dd></div>
+      </dl></section>`;
+  }
+
+  function aiAlerts() {
+    const { config, provider, metrics, available } = state.ai;
+    const alerts = [];
+    const model = aiModelInfo(config?.model);
+    if (provider && !provider.configured) alerts.push(["error", "Nenhuma chave da OpenAI cadastrada. O assistente não responde até uma chave ser salva.", "connection", "Cadastrar chave"]);
+    if (available && !available.ok && ["provider_auth", "provider_quota"].includes(available.error)) {
+      alerts.push(["error", available.error === "provider_auth" ? "A OpenAI recusou a chave cadastrada. Troque a chave na aba Conexão." : "A conta da OpenAI está sem crédito. Adicione saldo em platform.openai.com para o assistente voltar a responder.", "connection", "Ver conexão"]);
+    }
+    if (model?.shutdown_on) alerts.push(["warning", `A OpenAI desliga o ${model.label} em ${aiDate(model.shutdown_on)}. Troque de modelo antes disso para o assistente continuar respondendo.`, "model", "Escolher modelo"]);
+    else if (config && state.ai.models && !model) alerts.push(["warning", `O modelo ${config.model} não está no catálogo do painel: o custo das conversas não pode ser calculado.`, "model", "Escolher modelo"]);
+    if (available?.ok && config && !available.models.includes(config.model)) alerts.push(["error", `A chave cadastrada não tem acesso ao ${model?.label || config.model}. As conversas vão falhar até você trocar o modelo ou liberar o acesso na OpenAI.`, "model", "Ver modelos"]);
+    const noCredit = asNumber(metrics?.errors_by_code?.provider_quota);
+    if (noCredit && !(available && available.error === "provider_quota")) alerts.push(["error", `${count(noCredit)} ${noCredit === 1 ? "conversa falhou" : "conversas falharam"} no período por falta de crédito na OpenAI.`, "activity", "Ver atividade"]);
+    const month = metrics?.month;
+    const budget = month?.monthly_budget_usd == null ? null : asNumber(month.monthly_budget_usd);
+    if (budget) {
+      const spent = asNumber(month.month_cost_usd), projected = asNumber(month.projected_month_cost_usd);
+      if (spent >= budget) alerts.push([month.budget_hard_limit ? "error" : "warning", month.budget_hard_limit ? "O orçamento do mês acabou: novas conversas estão pausadas até o próximo mês." : `O gasto do mês (${usd(spent)}) passou do orçamento de ${usd(budget)}.`, "model", "Ajustar orçamento"]);
+      else if (projected > budget) alerts.push(["warning", `No ritmo atual, o mês deve fechar em ${usd(projected)}, acima do orçamento de ${usd(budget)}.`, "model", "Ajustar orçamento"]);
+    }
+    return alerts;
+  }
+
+  function renderAiAlerts() {
+    const alerts = aiAlerts();
+    if (!alerts.length) return "";
+    return `<div class="ai-alerts">${alerts.map(([tone, text, tab, label]) => `<div class="ai-notice ai-notice--${tone}" role="${tone === "error" ? "alert" : "status"}">${icon("alert")}<div>${esc(text)}</div>${tab && tab !== state.ai.tab ? `<button type="button" class="button button--secondary button--compact" data-ai-go="${esc(tab)}">${esc(label)}</button>` : ""}</div>`).join("")}</div>`;
+  }
+
+  function renderAiTabs() {
+    return `<div class="ai-tabs" role="tablist" aria-label="Seções do assistente">${AI_TABS.map(([id, label, iconName]) => {
+      const selected = state.ai.tab === id;
+      const dot = id === "model" && state.ai.dirty && ["model", "monthly_budget_usd", "budget_hard_limit"].some((field) => state.ai.draft?.[field] !== aiDraft(state.ai.config || {})[field]) ? `<span class="ai-tab-dot" aria-label="Alterações não salvas"></span>` : "";
+      return `<button id="ai-tab-${id}" type="button" role="tab" data-ai-tab="${id}" aria-controls="ai-tab-panel" aria-selected="${selected}" tabindex="${selected ? 0 : -1}">${icon(iconName)}<span>${esc(label)}</span>${dot}</button>`;
+    }).join("")}</div>`;
+  }
+
+  /* Visão geral ------------------------------------------------------------ */
+  function aiDayKeys(days) {
+    const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(new Date());
+    const base = Date.parse(`${today}T12:00:00Z`);
+    return Array.from({ length: days }, (_, index) => new Date(base - (days - 1 - index) * DAY_MS).toISOString().slice(0, 10));
+  }
+
+  function aiDayLabel(key) {
+    const [, month, day] = String(key).split("-");
+    return `${day}/${month}`;
+  }
+
+  function renderAiPeriod() {
+    return `<label class="ai-period-label" for="ai-period">Período<select id="ai-period" class="toolbar-select"${state.loading.aiMetrics ? " disabled" : ""}>${[7, 30, 90].map((days) => `<option value="${days}"${state.ai.days === days ? " selected" : ""}>Últimos ${days} dias</option>`).join("")}</select></label>`;
+  }
+
+  function renderAiCostChart() {
+    const metrics = state.ai.metrics;
+    if (!metrics) return state.loading.aiMetrics ? loadingState("Consultando os indicadores…") : emptyState("Indicadores indisponíveis", "Atualize a página para consultar o servidor.", "bar-chart");
+    const rows = new Map((Array.isArray(metrics.daily) ? metrics.daily : []).map((row) => [String(row.date).slice(0, 10), row]));
+    const values = aiDayKeys(state.ai.days).map((key) => {
+      const row = rows.get(key);
+      return { key, requests: asNumber(row?.requests), errors: asNumber(row?.errors), cost: asNumber(row?.estimated_cost_usd) };
+    });
+    if (!values.some((item) => item.requests > 0)) return emptyState("Sem conversas no período", "O gasto diário aparece aqui depois das primeiras conversas com o assistente.", "message");
+    const mode = state.ai.chart === "requests" ? "requests" : "cost";
+    const pick = (item) => mode === "cost" ? item.cost : item.requests;
+    const max = Math.max(...values.map(pick)) || 1;
+    const middle = values[Math.floor(values.length / 2)];
+    return `<div class="ai-chart" role="img" aria-label="${mode === "cost" ? "Gasto estimado" : "Conversas"} por dia nos últimos ${state.ai.days} dias. Valores na lista abaixo do gráfico.">${values.map((item) => {
+      const value = pick(item);
+      const height = value > 0 ? Math.max(4, Math.round(value * 100 / max)) : 0;
+      return `<div class="ai-chart-column" title="${esc(aiDayLabel(item.key))}: ${esc(usd(item.cost))} · ${count(item.requests)} conversas${item.errors ? ` · ${count(item.errors)} falhas` : ""}"><div class="ai-chart-track"><span class="${item.errors && mode === "requests" ? "has-errors" : ""}" style="height:${height}%"></span></div></div>`;
+    }).join("")}</div>
+      <div class="ai-chart-axis"><span>${esc(aiDayLabel(values[0].key))}</span><span>${esc(aiDayLabel(middle.key))}</span><span>${esc(aiDayLabel(values[values.length - 1].key))}</span></div>
+      <details class="ai-chart-details"><summary>Ver valores por dia</summary><div>${values.filter((item) => item.requests).reverse().map((item) => `<span>${esc(aiDayLabel(item.key))}<strong>${esc(usd(item.cost))} · ${count(item.requests)} conversas${item.errors ? ` · ${count(item.errors)} falhas` : ""}</strong></span>`).join("")}</div></details>`;
+  }
+
+  function renderAiBudget() {
+    const month = state.ai.metrics?.month;
+    if (!month) return `<section class="panel ai-budget-card"><div class="panel-head"><div><h3>Orçamento do mês</h3><p class="section-copy">Gasto estimado com a OpenAI.</p></div><span class="ai-section-icon">${icon("wallet")}</span></div>${state.loading.aiMetrics ? loadingState("Calculando o gasto…") : aiNotice("O gasto do mês ainda não está disponível.", "info")}</section>`;
+    const spent = asNumber(month.month_cost_usd), projected = asNumber(month.projected_month_cost_usd);
+    const budget = month.monthly_budget_usd == null ? null : asNumber(month.monthly_budget_usd);
+    const ratio = budget ? spent / budget : 0;
+    const tone = !budget ? "neutral" : ratio >= 1 ? "red" : projected > budget || ratio >= .8 ? "yellow" : "green";
+    const elapsed = asNumber(month.month_days_elapsed), total = asNumber(month.month_days_total, 30);
+    return `<section class="panel ai-budget-card ai-budget-card--${tone}"><div class="panel-head"><div><h3>Orçamento do mês</h3><p class="section-copy">Gasto estimado desde o dia 1º, no horário de Brasília.</p></div><span class="ai-section-icon">${icon("wallet")}</span></div>
+      <div class="ai-budget-figure"><strong>${esc(usd(spent))}</strong><span>${budget ? `de ${esc(usd(budget))}` : "sem orçamento definido"}</span></div>
+      ${brl(spent) ? `<small class="ai-budget-brl">${esc(brl(spent))}${state.ai.fx ? ` · dólar a ${esc(state.ai.fx.rate.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }))}` : ""}</small>` : ""}
+      ${budget ? `<div class="ai-budget-track" role="progressbar" aria-label="Uso do orçamento" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${clamp(Math.round(ratio * 100), 0, 100)}"><span style="width:${clamp(ratio * 100, 0, 100)}%"></span>${projected > spent ? `<i style="left:${clamp(projected * 100 / budget, 0, 100)}%" title="Projeção do mês"></i>` : ""}</div>` : ""}
+      <dl class="ai-budget-facts"><div><dt>Projeção do mês</dt><dd>${esc(usd(projected))}</dd></div><div><dt>Hoje</dt><dd>${esc(usd(month.today_cost_usd))} · ${count(month.today_requests)} conversas</dd></div><div><dt>Conversas no mês</dt><dd>${count(month.month_requests)}</dd></div><div><dt>Dias decorridos</dt><dd>${count(Math.ceil(elapsed))} de ${count(total)}</dd></div></dl>
+      ${budget ? `<p class="ai-field-hint">${month.budget_hard_limit ? "Ao chegar ao orçamento, novas conversas ficam pausadas até o próximo mês." : "O orçamento só gera alertas; as conversas continuam ao ultrapassá-lo."}</p>` : ""}
+      <button type="button" class="button button--secondary button--compact ai-full-button" data-ai-go="model">${icon("wallet")} ${budget ? "Ajustar orçamento" : "Definir orçamento"}</button></section>`;
+  }
+
+  function renderAiHealth() {
+    const metrics = state.ai.metrics;
+    const total = asNumber(metrics?.total_requests), ok = asNumber(metrics?.successful_requests);
+    const measured = asNumber(metrics?.cache_measured_input_tokens);
+    const cacheRate = measured > 0 ? Math.round(asNumber(metrics?.cached_input_tokens) * 100 / measured) : null;
+    const failures = Object.entries(metrics?.errors_by_code || {}).filter(([, value]) => asNumber(value) > 0).sort((a, b) => asNumber(b[1]) - asNumber(a[1]));
+    return `<section class="panel ai-operational-panel"><div class="panel-head"><div><h3>Saúde da operação</h3><p class="section-copy">Últimos ${state.ai.days} dias.</p></div><span class="ai-section-icon">${icon("heart-pulse")}</span></div>
+      <dl><div><dt>Conversas concluídas</dt><dd>${metrics ? `${pct(ok, total)}%` : "—"}<small>${metrics ? `${count(ok)} de ${count(total)}` : ""}</small></dd></div>
+      <div><dt>Tempo de resposta</dt><dd>${metrics ? `${(asNumber(metrics.avg_latency_ms) / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s` : "—"}<small>${metrics?.p95_latency_ms ? `95% em até ${(asNumber(metrics.p95_latency_ms) / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s` : ""}</small></dd></div>
+      <div><dt>Prompt reaproveitado do cache</dt><dd>${cacheRate == null ? "—" : `${cacheRate}%`}<small>${cacheRate == null ? "medido nas conversas novas" : "leitura de cache custa até 90% menos"}</small></dd></div>
+      <div><dt>Chamadas à OpenAI por conversa</dt><dd>${total && metrics?.provider_calls ? (asNumber(metrics.provider_calls) / total).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) : "—"}<small>inclui consultas ao histórico</small></dd></div>
+      <div><dt>Última conversa</dt><dd>${aiTime(metrics?.last_request_at)}</dd></div></dl>
+      ${failures.length ? `<div class="ai-failures"><strong>Falhas por motivo</strong>${failures.map(([code, value]) => `<span><span>${esc(aiFailure(code))}</span><b>${count(value)}</b></span>`).join("")}</div>` : metrics && total ? `<p class="ai-field-hint">${icon("check-circle")} Nenhuma falha no período.</p>` : ""}</section>`;
+  }
+
+  function renderAiOverview() {
+    const metrics = state.ai.metrics, month = metrics?.month;
+    const total = asNumber(metrics?.total_requests);
+    const budget = month?.monthly_budget_usd == null ? null : asNumber(month.monthly_budget_usd);
+    const avgTokens = asNumber(metrics?.avg_input_tokens) + asNumber(metrics?.avg_output_tokens);
+    return `<div class="ai-toolbar"><div><h3>Resumo</h3><p class="section-copy">Gasto estimado com a OpenAI e uso do assistente. Valores em dólar, como a OpenAI cobra.</p></div>${renderAiPeriod()}</div>
+      ${state.errors.aiMetrics ? aiNotice(aiError(state.errors.aiMetrics), "error", "aiMetrics") : ""}
+      <div class="metric-grid ai-metric-grid">
+        ${metricCard("Gasto no mês", month ? usd(month.month_cost_usd) : "—", month ? `${brl(month.month_cost_usd) ? `<strong>${esc(brl(month.month_cost_usd))}</strong> · ` : ""}hoje ${esc(usd(month.today_cost_usd))}` : "Aguardando dados", "green", "wallet")}
+        ${metricCard("Projeção do mês", month ? usd(month.projected_month_cost_usd) : "—", budget ? `<strong>${pct(month.projected_month_cost_usd, budget)}%</strong> do orçamento de ${esc(usd(budget))}` : "No ritmo dos últimos dias", "purple", "trending")}
+        ${metricCard("Conversas", metrics ? count(total) : "—", metrics ? `<strong>${count(metrics.active_users)}</strong> ${asNumber(metrics.active_users) === 1 ? "conta" : "contas"} · ${state.ai.days} dias` : "Aguardando dados", "blue", "message")}
+        ${metricCard("Custo por conversa", metrics?.avg_cost_per_request_usd != null ? usd(metrics.avg_cost_per_request_usd) : "—", avgTokens ? `≈ <strong>${esc(compactTokens(avgTokens))}</strong> tokens por conversa` : "Média das conversas com custo", "yellow", "cpu")}
+      </div>
+      <div class="ai-overview-grid"><section class="panel"><div class="panel-head"><div><h3>${state.ai.chart === "requests" ? "Conversas por dia" : "Gasto por dia"}</h3><p class="section-copy">Últimos ${state.ai.days} dias, no horário de Brasília.</p></div><div class="ai-segmented" role="group" aria-label="Métrica do gráfico"><button type="button" data-ai-chart="cost" aria-pressed="${state.ai.chart !== "requests"}">Gasto</button><button type="button" data-ai-chart="requests" aria-pressed="${state.ai.chart === "requests"}">Conversas</button></div></div>${renderAiCostChart()}</section>${renderAiBudget()}</div>
+      <div class="ai-overview-grid ai-overview-grid--even">${renderAiHealth()}${renderAiModelUsage(true)}</div>`;
+  }
+
+  /* Modelo e custos -------------------------------------------------------- */
+  function renderAiProbe(model) {
+    const probe = state.ai.probes[model];
+    if (!probe) return "";
+    if (probe.loading) return `<span class="ai-probe is-loading">${icon("loader", "icon spin")} Testando…</span>`;
+    if (probe.ok) return `<span class="ai-probe is-ok">${icon("check-circle")} Respondeu em ${(asNumber(probe.latency_ms) / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s${probe.structured_output ? " no formato do assistente" : ""}</span>`;
+    return `<span class="ai-probe is-error">${icon("alert")} ${esc(probe.message || aiFailure(probe.error))}</span>`;
+  }
+
+  function renderAiModelCard(model, profile) {
+    const ai = state.ai;
+    const selected = ai.draft?.model === model.model, current = ai.config?.model === model.model;
+    const estimate = aiEstimate(model, profile);
+    const availability = ai.available?.ok ? ai.available.models.includes(model.model) : null;
+    const monthly = profile.requests30 > 0 ? estimate * profile.requests30 : null;
+    const disabled = ai.saving || !ai.draft ? " disabled" : "";
+    return `<article class="ai-model-card${selected ? " is-selected" : ""}${model.shutdown_on ? " is-legacy" : ""}">
+      <label class="ai-model-select"><input type="radio" name="ai-model" value="${esc(model.model)}" data-ai-field="model"${selected ? " checked" : ""}${disabled}>
+        <span class="ai-model-main"><span class="ai-model-head"><span class="ai-model-radio" aria-hidden="true"></span><span class="ai-model-name"><strong>${esc(model.label)}</strong><code>${esc(model.model)}</code></span></span>
+        <span class="ai-model-tags">${model.recommended ? pill("Recomendado", "green") : ""}${current ? pill("Em uso", "blue") : ""}${model.shutdown_on ? pill(`Sai do ar em ${String(model.shutdown_on).slice(0, 10).split("-").reverse().join("/")}`, "yellow") : ""}</span>
+        <span class="ai-model-copy">${esc(model.description)}</span></span>
+        <span class="ai-model-prices"><em>Tarifa por 1 milhão de tokens</em><span><small>Entrada</small><strong>${esc(usd(model.input_usd_per_million))}</strong></span><span><small>Lida do cache</small><strong>${esc(usd(model.cached_input_usd_per_million))}</strong></span><span><small>Saída</small><strong>${esc(usd(model.output_usd_per_million))}</strong></span></span>
+        <span class="ai-model-estimate"><em>Estimativa de gasto</em><span class="is-main"><small>Por conversa</small><strong>${esc(usd(estimate))}${brl(estimate) ? `<i>${esc(brl(estimate))}</i>` : ""}</strong></span><span><small>A cada 1.000 conversas</small><strong>${esc(usd(estimate * 1000))}</strong></span>${monthly != null ? `<span><small>Por mês, no volume atual</small><strong>${esc(usd(monthly))}</strong></span>` : ""}</span>
+      </label>
+      <div class="ai-model-foot"><span class="ai-model-access${availability === true ? " is-ok" : availability === false ? " is-error" : ""}">${availability === true ? `${icon("check-circle")} Liberado na sua chave` : availability === false ? `${icon("alert")} Não encontrado na sua chave` : `${icon("clock")} Acesso ainda não verificado`}</span>${renderAiProbe(model.model)}<button type="button" class="button button--secondary button--compact" data-ai-probe="${esc(model.model)}"${ai.probes[model.model]?.loading ? " disabled" : ""}>${icon("activity")} Testar</button></div>
+    </article>`;
+  }
+
+  function renderAiBudgetForm() {
+    const ai = state.ai, draft = ai.draft, month = ai.metrics?.month;
+    if (!draft || !ai.config) return "";
+    if (!Object.hasOwn(ai.config, "budget_hard_limit")) return `<section class="panel ai-settings-panel">${aiNotice("O orçamento mensal depende da migração de custos do assistente no servidor.", "info")}</section>`;
+    const disabled = ai.saving ? " disabled" : "";
+    const hasBudget = String(draft.monthly_budget_usd).trim() !== "";
+    return `<section class="panel ai-settings-panel" aria-labelledby="ai-budget-title"><div class="panel-head"><div><span class="eyebrow">Controle de gasto</span><h3 id="ai-budget-title">Orçamento mensal</h3><p class="section-copy">Acompanhe e, se quiser, limite o gasto estimado do mês.</p></div><span class="ai-section-icon">${icon("wallet")}</span></div>
+      <label class="field-label" for="ai-budget">Orçamento por mês</label><div class="ai-money-input"><span>US$</span><input id="ai-budget" data-ai-field="monthly_budget_usd" inputmode="decimal" autocomplete="off" placeholder="Sem limite" value="${esc(draft.monthly_budget_usd)}" aria-describedby="ai-budget-hint"${disabled}></div>
+      <p id="ai-budget-hint" class="ai-field-hint">Em dólar, como a OpenAI cobra. Deixe em branco para não ter orçamento.${month ? ` Gasto até agora: ${esc(usd(month.month_cost_usd))}.` : ""}</p>
+      <label class="ai-toggle-row" for="ai-budget-hard"><span><strong>Pausar ao atingir o orçamento</strong><small>Novas conversas ficam bloqueadas até o próximo mês. Desligado, o orçamento só gera alertas.</small></span><span class="ai-switch"><input id="ai-budget-hard" type="checkbox" role="switch" data-ai-field="budget_hard_limit"${draft.budget_hard_limit ? " checked" : ""}${disabled || (!hasBudget ? " disabled" : "")}><span aria-hidden="true"></span></span></label>
+    </section>`;
+  }
+
+  function renderAiModelTab() {
+    const ai = state.ai;
+    if (!ai.config) return state.loading.aiConfig ? loadingState("Carregando a configuração do assistente…") : aiNotice(aiError(state.errors.aiConfig || "A configuração do assistente está indisponível."), "error", "aiConfig");
+    const items = ai.models?.items || [];
+    const profile = aiProfile();
+    const available = ai.available;
+    const checking = state.loading.aiAvailable;
+    const accessLine = checking ? "Consultando os modelos liberados na chave…"
+      : available ? (available.ok ? `${count(available.models.length)} modelos liberados na chave · verificado em ${dateTime(available.checkedAt)}` : `Não foi possível listar os modelos: ${aiFailure(available.error)}.`)
+      : state.errors.aiAvailable ? aiError(state.errors.aiAvailable) : "Disponibilidade na chave ainda não verificada.";
+    return `<form id="ai-config-form" class="ai-form-stack" novalidate>
+        <section class="panel" aria-labelledby="ai-models-title"><div class="panel-head"><div><span class="eyebrow">Modelo da OpenAI</span><h3 id="ai-models-title">Escolha o modelo do assistente</h3><p class="section-copy">Todos os modelos da lista entendem imagens, consultam o histórico e devolvem respostas no formato que o app exige.</p></div><button type="button" class="button button--secondary button--compact" data-ai-retry="aiAvailable"${checking ? " disabled" : ""}>${icon(checking ? "loader" : "refresh", checking ? "icon spin" : "icon")} Verificar na chave</button></div>
+          <p class="ai-access-line${available && !available.ok ? " is-error" : ""}">${esc(accessLine)}</p>
+          ${state.errors.aiModels ? aiNotice(aiError(state.errors.aiModels), "error", "aiModels") : ""}
+          ${!items.length && state.loading.aiModels ? loadingState("Carregando o catálogo…") : ""}
+          <div class="ai-model-list" role="radiogroup" aria-labelledby="ai-models-title">${items.map((model) => renderAiModelCard(model, profile)).join("")}</div>
+          <p class="ai-field-hint">${profile.measured ? `Estimativa com a média de ${count(profile.sample)} ${profile.sample === 1 ? "conversa" : "conversas"} dos últimos 30 dias (≈ ${esc(compactTokens(profile.input))} tokens de entrada e ${esc(compactTokens(profile.output))} de saída).` : `Estimativa com uma conversa típica (≈ 9 mil tokens de entrada e 300 de saída), até haver conversas suficientes para medir.`} Modelos com raciocínio podem gastar mais tokens de saída que o previsto. Tarifas conferidas em ${esc(aiDate(items[0]?.verified_at))}.</p>
+        </section>
+      <div class="ai-model-extras">${renderAiBudgetForm()}
+        <section class="panel ai-note-panel"><span class="ai-section-icon">${icon("info")}</span><h3>Como o gasto é calculado</h3><ul><li>Cada conversa registra os tokens informados pela OpenAI e a tarifa do modelo no momento da conversa.</li><li>Prompt lido do cache custa até 90% menos; nos modelos novos, gravar no cache custa 25% a mais que a entrada.</li><li>É uma estimativa: a cobrança oficial fica no <a href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer">painel de uso da OpenAI</a>.</li></ul></section>
+        <section class="panel ai-note-panel"><span class="ai-section-icon">${icon("shield")}</span><h3>Modelos gratuitos</h3><p>Nenhum modelo gratuito atende ao assistente: as opções sem custo (nível gratuito do Gemini, tokens grátis da OpenAI por compartilhamento de dados) usam as conversas para treinar modelos, e o assistente envia ganhos, gastos e endereços dos motoristas. Na prática, o GPT-6 Luna custa frações de centavo por conversa.</p></section>
+      </div>
+    </form>`;
+  }
+
+  /* Experiência no app ----------------------------------------------------- */
+  function renderAiPreview() {
+    const draft = state.ai.draft;
+    const suggestions = String(draft?.suggestions_text || "").split("\n").map((item) => item.trim()).filter(Boolean).slice(0, 6);
+    return `<div class="ai-phone"><div class="ai-phone-bar"><span>${icon("sparkles")}</span><strong>Gain IA</strong></div>
+      <div class="ai-preview-chat"><div class="ai-preview-avatar">${icon("sparkles")}</div><div class="ai-preview-bubble"><p>${esc(draft?.welcome_message || "Configure a mensagem de boas-vindas do assistente.")}</p></div></div>
+      <div class="ai-preview-suggestions">${suggestions.map((item) => `<span>${esc(item)}</span>`).join("")}</div>
+      <div class="ai-phone-input"><span>Pergunte ao Gain IA…</span>${icon("send")}</div></div>`;
+  }
+
+  function renderAiExperience() {
+    const ai = state.ai;
+    if (!ai.config) return state.loading.aiConfig ? loadingState("Carregando a configuração do assistente…") : aiNotice(aiError(state.errors.aiConfig || "A configuração do assistente está indisponível."), "error", "aiConfig");
+    const draft = ai.draft, disabled = ai.saving ? " disabled" : "";
+    return `<form id="ai-config-form" class="ai-columns" novalidate>
+      <div class="ai-form-stack">
+        <section class="panel ai-settings-panel" aria-labelledby="ai-operation-title">
+          <div class="panel-head"><div><span class="eyebrow">Disponibilidade</span><h3 id="ai-operation-title">Quem usa e quanto</h3><p class="section-copy">Vale para as próximas conversas no app.</p></div><span class="ai-section-icon">${icon("users")}</span></div>
+          <label class="ai-toggle-row" for="ai-enabled"><span><strong>Disponibilizar o assistente</strong><small>Mostra o Gain IA na tela inicial para todos os usuários.</small></span><span class="ai-switch"><input id="ai-enabled" type="checkbox" role="switch" data-ai-field="enabled"${draft.enabled ? " checked" : ""}${disabled}><span aria-hidden="true"></span></span></label>
+          <label class="ai-toggle-row" for="ai-allow-mutations"><span><strong>Permitir ajustes de rotina</strong><small>O assistente propõe metas, lançamentos e correções; o usuário confirma cada um antes de aplicar.</small></span><span class="ai-switch"><input id="ai-allow-mutations" type="checkbox" role="switch" data-ai-field="allow_mutations"${draft.allow_mutations ? " checked" : ""}${disabled}><span aria-hidden="true"></span></span></label>
+          <label class="field-label" for="ai-daily-limit">Mensagens por conta, por dia</label><input id="ai-daily-limit" class="ai-short-input" data-ai-field="daily_message_limit" type="number" min="1" max="500" step="1" inputmode="numeric" value="${esc(draft.daily_message_limit)}" required aria-describedby="ai-limit-hint"${disabled}><p id="ai-limit-hint" class="ai-field-hint">De 1 a 500. O limite é controlado no servidor e também segura o gasto.</p>
+        </section>
+        <section class="panel ai-settings-panel" aria-labelledby="ai-experience-title">
+          <div class="panel-head"><div><span class="eyebrow">Recepção</span><h3 id="ai-experience-title">Boas-vindas e sugestões</h3><p class="section-copy">O que o motorista vê ao abrir a conversa.</p></div><span class="ai-section-icon">${icon("message")}</span></div>
+          <label class="field-label" for="ai-welcome">Mensagem de boas-vindas</label><textarea id="ai-welcome" data-ai-field="welcome_message" rows="3" maxlength="500" required${disabled}>${esc(draft.welcome_message)}</textarea>
+          <label class="field-label" for="ai-suggestions">Sugestões de conversa</label><textarea id="ai-suggestions" data-ai-field="suggestions_text" rows="4" aria-describedby="ai-suggestions-hint" required${disabled}>${esc(draft.suggestions_text)}</textarea><p id="ai-suggestions-hint" class="ai-field-hint">Uma por linha. De 1 a 6 sugestões, com até 120 caracteres cada.</p>
+        </section>
+        <section class="panel ai-settings-panel" aria-labelledby="ai-behavior-title">
+          <div class="panel-head"><div><span class="eyebrow">Comportamento</span><h3 id="ai-behavior-title">Orientações para o assistente</h3><p class="section-copy">Tom de voz, foco e regras do produto.</p></div><span class="ai-section-icon">${icon("sparkles")}</span></div>
+          <label class="field-label" for="ai-instructions">Instruções adicionais</label><textarea id="ai-instructions" data-ai-field="instructions" rows="7" maxlength="8000" placeholder="Ex.: Responda em português, seja objetivo e explique o impacto de cada ajuste."${disabled}>${esc(draft.instructions)}</textarea><p class="ai-field-hint">Isolamento dos dados por conta e confirmação das mudanças continuam garantidos pelo servidor, seja qual for a instrução.</p>
+        </section>
+      </div>
+      <aside class="ai-side-stack"><section class="panel ai-preview-panel"><span class="eyebrow">Prévia</span><h3>Como aparece no app</h3><p class="section-copy">Atualiza enquanto você edita.</p><div id="ai-preview-content">${renderAiPreview()}</div><div class="ai-preview-footer">${icon("device")} As cores acompanham o tema escolhido no app.</div></section></aside>
+    </form>`;
+  }
+
+  /* Atividade -------------------------------------------------------------- */
+  function renderAiModelUsage(compact = false) {
+    const rows = state.ai.metrics?.by_model || [];
+    const body = !state.ai.metrics ? (state.loading.aiMetrics ? loadingState("Consultando…") : emptyState("Sem dados", "Atualize para consultar o servidor.", "cpu"))
+      : !rows.length ? emptyState("Sem conversas no período", "O uso por modelo aparece depois das primeiras conversas.", "cpu")
+      : `<table class="data-table ai-table"><thead><tr><th>Modelo</th><th>Conversas</th>${compact ? "" : "<th>Tokens</th>"}<th>Gasto</th><th>Por conversa</th></tr></thead><tbody>${rows.map((row) => {
+        const status = asNumber(row.unpriced_requests) ? pill("Sem tarifa", "yellow") : asNumber(row.legacy_estimated_requests) ? pill("Inclui estimativa antiga", "neutral") : "";
+        return `<tr><td><span class="cell-primary">${esc(row.label || row.model || "—")}</span><span class="cell-secondary">${esc(row.model || "")}</span>${status}</td><td class="cell-metric">${count(row.requests)}${asNumber(row.errors) ? `<span class="cell-secondary">${count(row.errors)} falhas</span>` : ""}</td>${compact ? "" : `<td class="cell-metric">${esc(compactTokens(asNumber(row.input_tokens) + asNumber(row.output_tokens)))}<span class="cell-secondary">${esc(compactTokens(row.cached_input_tokens))} do cache</span></td>`}<td class="cell-metric">${esc(usd(row.estimated_cost_usd))}</td><td class="cell-metric">${esc(usd(row.avg_cost_per_request_usd))}</td></tr>`;
+      }).join("")}</tbody></table>`;
+    return `<section class="panel ai-table-panel"><div class="panel-head"><div><h3>Uso por modelo</h3><p class="section-copy">Gasto estimado de cada modelo no período.</p></div><span class="ai-section-icon">${icon("cpu")}</span></div>${body}</section>`;
+  }
+
+  function renderAiTopUsers() {
+    const rows = state.ai.metrics?.top_users || [];
+    const body = !state.ai.metrics ? (state.loading.aiMetrics ? loadingState("Consultando…") : emptyState("Sem dados", "Atualize para consultar o servidor.", "users"))
+      : !rows.length ? emptyState("Nenhuma conta usou o assistente", "As contas aparecem aqui depois das primeiras conversas.", "users")
+      : `<table class="data-table ai-table"><thead><tr><th>Conta</th><th>Conversas</th><th>Gasto</th><th>Última</th></tr></thead><tbody>${rows.map((row) => {
+        const account = (state.accounts || []).find((item) => item.userId === row.user_id);
+        return `<tr${account ? ` data-action tabindex="0" data-open-user="${esc(account.key)}"` : ""}><td><span class="cell-primary">${esc(row.email || `Conta ${String(row.user_id || "").slice(0, 8)}`)}</span><span class="cell-secondary">${esc(String(row.user_id || "").slice(0, 8))}</span></td><td class="cell-metric">${count(row.requests)}${asNumber(row.errors) ? `<span class="cell-secondary">${count(row.errors)} falhas</span>` : ""}</td><td class="cell-metric">${esc(usd(row.estimated_cost_usd))}<span class="cell-secondary">${esc(compactTokens(row.total_tokens))} tokens</span></td><td><span class="cell-secondary">${aiTime(row.last_request_at)}</span></td></tr>`;
+      }).join("")}</tbody></table>`;
+    return `<section class="panel ai-table-panel"><div class="panel-head"><div><h3>Contas que mais usam</h3><p class="section-copy">Dez contas com maior gasto no período.</p></div><span class="ai-section-icon">${icon("users")}</span></div>${body}</section>`;
+  }
+
+  function renderAiActions() {
+    const metrics = state.ai.metrics;
+    const proposed = asNumber(metrics?.actions_proposed), applied = asNumber(metrics?.actions_applied), rejected = asNumber(metrics?.actions_rejected);
+    return `<section class="panel ai-operational-panel"><div class="panel-head"><div><h3>Ajustes propostos</h3><p class="section-copy">Mudanças sugeridas pelo assistente e decididas pelo usuário.</p></div><span class="ai-section-icon">${icon("check-double")}</span></div>
+      <dl><div><dt>Propostas</dt><dd>${aiMetric("actions_proposed")}</dd></div><div><dt>Aplicadas</dt><dd>${aiMetric("actions_applied")}<small>${proposed ? `${pct(applied, proposed)}% das propostas` : ""}</small></dd></div><div><dt>Recusadas</dt><dd>${aiMetric("actions_rejected")}<small>${proposed ? `${pct(rejected, proposed)}% das propostas` : ""}</small></dd></div></dl></section>`;
+  }
+
+  function renderAiEvents() {
+    const ai = state.ai;
+    if (state.loading.aiEvents && !ai.events) return loadingState("Carregando os eventos…");
+    if (!ai.events) return aiNotice(aiError(state.errors.aiEvents || "O registro de atividade está indisponível."), "error", "aiEvents");
+    const filter = ai.eventFilter;
+    const events = ai.events.filter((event) => filter === "all" || (filter === "failed" ? event.status === "failed" : event.event_type === filter));
+    if (!ai.events.length) return emptyState("Nenhuma atividade registrada", "Conversas e ações aparecem aqui quando o assistente começar a ser usado.", "activity");
+    if (!events.length) return emptyState("Nada neste filtro", "Nenhum evento recente corresponde ao filtro escolhido.", "filter");
+    const statuses = { pending: ["Em andamento", "yellow"], completed: ["Concluída", "green"], failed: ["Falha", "red"], applied: ["Aplicada", "green"], rejected: ["Recusada", "neutral"] };
+    const actions = { update_settings: "Ajuste de configurações", create_entry: "Novo lançamento", update_entry: "Correção de lançamento", delete_entry: "Lançamento para a lixeira" };
+    return `<ul class="ai-event-list">${events.map((event) => {
+      const status = statuses[event.status] || ["Desconhecido", "neutral"];
+      const isAction = event.event_type === "action";
+      const tokens = asNumber(event.input_tokens) + asNumber(event.output_tokens);
+      const costStatus = AI_COST_STATUS[event.cost_status];
+      const model = aiModelInfo(event.model);
+      return `<li class="ai-event-row"><span class="ai-event-icon${event.status === "failed" ? " is-error" : isAction ? " is-action" : ""}">${icon(isAction ? "check-circle" : "message")}</span>
+        <div class="ai-event-copy"><strong>${isAction ? esc(actions[event.action_type] || "Ajuste de rotina") : "Conversa"}</strong><span>${esc(aiAccountLabel(event.user_id))}${!isAction ? ` · ${esc(model?.label || event.model || "modelo não informado")}` : ""}</span>${event.error_code ? `<small class="ai-event-error">${esc(aiFailure(event.error_code))}</small>` : ""}</div>
+        <div class="ai-event-meta">${isAction ? "" : `<strong>${esc(event.estimated_cost_usd != null ? usd(event.estimated_cost_usd) : "—")}</strong><small>${tokens ? `${esc(compactTokens(tokens))} tokens` : "sem tokens"}${event.latency_ms != null ? ` · ${(asNumber(event.latency_ms) / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s` : ""}</small>${costStatus && event.cost_status !== "estimated" ? `<small class="ai-cost-note">${esc(costStatus[0])}</small>` : ""}`}</div>
+        <div class="ai-event-status">${pill(status[0], status[1])}<small>${aiTime(event.created_at)}</small></div></li>`;
+    }).join("")}</ul>`;
+  }
+
+  function renderAiActivity() {
+    const filters = [["all", "Tudo"], ["chat", "Conversas"], ["action", "Ajustes"], ["failed", "Falhas"]];
+    return `<div class="ai-toolbar"><div><h3>Atividade</h3><p class="section-copy">Uso por modelo e por conta, ajustes e o registro técnico. O conteúdo das conversas nunca é guardado.</p></div>${renderAiPeriod()}</div>
+      ${state.errors.aiMetrics ? aiNotice(aiError(state.errors.aiMetrics), "error", "aiMetrics") : ""}
+      ${renderAiModelUsage()}
+      <div class="ai-overview-grid">${renderAiTopUsers()}${renderAiActions()}</div>
+      <section class="panel ai-events-panel"><div class="panel-head"><div><h3>Registro de atividade</h3><p class="section-copy">Os 100 eventos mais recentes, só com metadados.</p></div><button type="button" class="button button--secondary button--compact" data-ai-retry="aiEvents"${state.loading.aiEvents ? " disabled" : ""}>${icon("refresh", state.loading.aiEvents ? "icon spin" : "icon")} Atualizar</button></div>
+        <div class="filter-row" role="group" aria-label="Filtrar eventos">${filters.map(([id, label]) => `<button type="button" class="filter-chip" data-ai-events="${id}" aria-pressed="${state.ai.eventFilter === id}">${esc(label)}</button>`).join("")}</div>
+        ${state.errors.aiEvents && state.ai.events ? aiNotice(aiError(state.errors.aiEvents), "error", "aiEvents") : ""}${renderAiEvents()}</section>`;
+  }
+
+  /* Conexão ---------------------------------------------------------------- */
   function renderAiProvider() {
     const ai = state.ai, provider = ai.provider;
     const last4 = /^[a-zA-Z0-9_-]{1,4}$/.test(provider?.key_last4 || "") ? provider.key_last4 : "";
-    return `<section class="panel ai-security-panel ai-provider-panel"><span class="ai-section-icon">${icon("key")}</span><h3>Chave da OpenAI</h3><p>Cadastre ou troque a chave usada pelo assistente. Ela é enviada ao servidor por conexão autenticada e armazenada com criptografia.</p>
+    return `<section class="panel ai-provider-panel"><div class="panel-head"><div><span class="eyebrow">OpenAI</span><h3>Chave de API</h3><p class="section-copy">Cifrada no cofre do Supabase. O painel nunca mostra a chave completa nem a guarda neste navegador.</p></div><span class="ai-section-icon">${icon("key")}</span></div>
       <div class="ai-provider-status">${provider ? `${pill(provider.configured ? "Chave cadastrada" : "Cadastro pendente", provider.configured ? "green" : "yellow")}${provider.configured && last4 ? `<span class="ai-masked-key">•••• ${esc(last4)}</span>` : ""}<small>${provider.updated_at ? `Atualizada em ${aiTime(provider.updated_at)}` : "Nenhuma chave cadastrada"}</small>` : `<small>${state.loading.aiProvider ? "Consultando o cadastro…" : "Cadastro ainda não verificado"}</small>`}</div>
-      ${state.errors.aiProvider ? `<div class="ai-connection-warning is-error" role="alert">${esc(aiError(state.errors.aiProvider))}</div><button type="button" class="button button--secondary button--compact ai-connection-check" data-ai-retry="aiProvider">Atualizar cadastro</button>` : ""}
-      <form id="ai-provider-form" autocomplete="off"><label class="field-label" for="ai-provider-key">${provider?.configured ? "Nova chave de API" : "Chave de API"}</label><input id="ai-provider-key" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" placeholder="sk-…" minlength="20" maxlength="512" required aria-describedby="ai-key-hint"${ai.providerSaving ? " disabled" : ""}><p id="ai-key-hint" class="ai-field-hint">A chave completa nunca é exibida pelo painel nem salva neste navegador.</p>
+      ${state.errors.aiProvider ? `<div class="ai-connection-warning is-error" role="alert">${esc(aiError(state.errors.aiProvider))}</div><button type="button" class="button button--secondary button--compact ai-full-button" data-ai-retry="aiProvider">Atualizar cadastro</button>` : ""}
+      <form id="ai-provider-form" autocomplete="off"><label class="field-label" for="ai-provider-key">${provider?.configured ? "Nova chave de API" : "Chave de API"}</label><input id="ai-provider-key" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" placeholder="sk-…" minlength="20" maxlength="512" required aria-describedby="ai-key-hint"${ai.providerSaving ? " disabled" : ""}><p id="ai-key-hint" class="ai-field-hint">A troca vale na hora para as próximas conversas.</p>
         ${ai.providerError ? `<div class="ai-connection-warning is-error" role="alert">${esc(ai.providerError)}</div>` : ""}
-        <button id="ai-provider-save" type="submit" class="button button--primary ai-connection-check" disabled>${icon(ai.providerSaving ? "loader" : "shield", ai.providerSaving ? "icon spin" : "icon")} ${ai.providerSaving ? "Salvando chave…" : provider?.configured ? "Trocar chave" : "Salvar chave"}</button></form></section>`;
+        <button id="ai-provider-save" type="submit" class="button button--primary ai-full-button" disabled>${icon(ai.providerSaving ? "loader" : "shield", ai.providerSaving ? "icon spin" : "icon")} ${ai.providerSaving ? "Salvando chave…" : provider?.configured ? "Trocar chave" : "Salvar chave"}</button></form></section>`;
   }
 
   async function saveAiProvider() {
@@ -2722,10 +3247,10 @@
       const result = aiResponse(await rpc("admin_set_ai_assistant_provider_key", { p_key: key }));
       if (result.configured === true) ai.provider = { configured: true, key_last4: String(result.key_last4 || "").slice(-4), updated_at: result.updated_at };
       else await loadAiProvider({ quiet: true });
-      delete state.errors.aiProvider;
-      delete state.errors.aiHealth;
-      ai.health = null;
-      toast("Chave do assistente salva", "success", "A chave foi protegida no servidor. Verifique a conexão para conferir a disponibilidade.");
+      delete state.errors.aiProvider; delete state.errors.aiHealth; delete state.errors.aiAvailable;
+      ai.health = null; ai.available = null; ai.probes = {};
+      toast("Chave do assistente salva", "success", "Conferindo o acesso da nova chave aos modelos…");
+      loadAiAvailability({ quiet: true });
     } catch {
       ai.providerError = "Não foi possível salvar a chave. Confira a conexão, sua permissão administrativa e a disponibilidade do módulo no servidor.";
       toast("Não foi possível salvar a chave", "error", "O campo foi limpo por segurança. Tente novamente quando o serviço estiver disponível.");
@@ -2735,134 +3260,64 @@
     }
   }
 
-  function loadAiHealth(options = {}) {
-    return loadResource("aiHealth", () => requestJson(`${SUPABASE_URL}/functions/v1/gain-assistant`, { method: "POST", body: JSON.stringify({ operation: "config" }) }), (result) => {
-      if (typeof result?.provider_ready !== "boolean") throw new Error("A função respondeu sem informar a disponibilidade da chave. Confira a versão publicada no servidor.");
-      state.ai.health = { providerReady: result.provider_ready, checkedAt: Date.now() };
-    }, options);
+  function renderAiReadiness() {
+    const { config, provider, health, available } = state.ai;
+    const model = aiModelInfo(config?.model);
+    const checks = [
+      ["Função gain-assistant respondendo", health ? true : state.errors.aiHealth ? false : null, health ? `Verificada em ${dateTime(health.checkedAt)}` : state.errors.aiHealth ? aiError(state.errors.aiHealth) : "Ainda não verificada"],
+      ["Chave cadastrada no cofre", provider ? provider.configured : null, provider?.configured ? `Final ${provider.key_last4 || "—"}` : provider ? "Cadastre a chave ao lado" : "Consultando"],
+      ["Chave aceita pela OpenAI", available ? available.ok : null, available ? (available.ok ? `${count(available.models.length)} modelos liberados` : aiFailure(available.error)) : state.errors.aiAvailable ? aiError(state.errors.aiAvailable) : "Ainda não verificada"],
+      ["Modelo atual liberado na chave", available?.ok && config ? available.models.includes(config.model) : null, model?.label || config?.model || "—"],
+      ["Assistente disponível no app", config ? config.enabled : null, config ? (config.enabled ? "Visível na tela inicial" : "Desligado na aba Experiência") : "Consultando"]
+    ];
+    const running = state.loading.aiHealth || state.loading.aiAvailable;
+    return `<section class="panel ai-readiness"><div class="panel-head"><div><span class="eyebrow">Prontidão</span><h3>O assistente está pronto para responder?</h3><p class="section-copy">Checagens sem custo: não chamam o modelo nem gastam a cota dos usuários.</p></div><button type="button" class="button button--primary button--compact" data-ai-check-all${running ? " disabled" : ""}>${icon(running ? "loader" : "activity", running ? "icon spin" : "icon")} ${running ? "Verificando…" : "Verificar tudo"}</button></div>
+      <ul class="ai-check-list">${checks.map(([label, ok, detail]) => `<li class="${ok === true ? "is-ok" : ok === false ? "is-error" : "is-pending"}"><span class="ai-check-icon">${icon(ok === true ? "check" : ok === false ? "x" : "clock")}</span><span><strong>${esc(label)}</strong><small>${esc(detail)}</small></span></li>`).join("")}</ul>
+      <p class="ai-field-hint">Para confirmar crédito e formato de resposta, use <strong>Testar</strong> num modelo da aba Modelo e custos (custa frações de centavo).</p></section>`;
   }
 
   function renderAiConnection() {
-    const health = state.ai.health;
-    return `<div class="ai-connection-status">${health ? `<div>${pill("Serviço conectado", "green")}${pill(health.providerReady ? "Chave configurada" : "Chave pendente", health.providerReady ? "green" : "yellow")}</div><small>Verificado em ${dateTime(health.checkedAt)}</small>` : `<small>Conexão ainda não verificada</small>`}</div>
-      ${health && !health.providerReady ? `<div class="ai-connection-warning">Cadastre a chave no cartão acima para liberar as respostas do assistente.</div>` : ""}
-      ${state.errors.aiHealth ? `<div class="ai-connection-warning is-error" role="alert">${esc(aiError(state.errors.aiHealth))}</div>` : ""}
-      <button type="button" class="button button--secondary button--compact ai-connection-check" data-ai-retry="aiHealth"${state.loading.aiHealth ? " disabled" : ""}>${icon(state.loading.aiHealth ? "loader" : "activity", state.loading.aiHealth ? "icon spin" : "icon")} ${state.loading.aiHealth ? "Verificando…" : "Verificar conexão"}</button><p>A verificação confirma a função e a presença da chave. A disponibilidade do modelo e a cota são avaliadas durante as conversas.</p>`;
-  }
-
-  function aiTime(value) {
-    const timestamp = typeof value === "number" ? value : Date.parse(value);
-    return Number.isFinite(timestamp) ? dateTime(timestamp) : "—";
-  }
-
-  function aiMetric(name, suffix = "") {
-    const value = state.ai.metrics?.[name];
-    return value != null && Number.isFinite(Number(value)) ? `${count(value)}${suffix}` : "—";
-  }
-
-  function aiNotice(message, tone = "warning", retry = "") {
-    return `<div class="ai-notice ai-notice--${tone}" role="${tone === "error" ? "alert" : "status"}">${icon(tone === "error" ? "alert" : "shield")}<div>${esc(message)}</div>${retry ? `<button type="button" class="button button--secondary button--compact" data-ai-retry="${esc(retry)}">Tentar novamente</button>` : ""}</div>`;
-  }
-
-  function renderAiPreview() {
-    const draft = state.ai.draft;
-    return `<div class="ai-preview-chat"><div class="ai-preview-avatar">${icon("sparkles")}</div><div class="ai-preview-bubble"><strong>Gain Assistente</strong><p>${esc(draft?.welcome_message || "Configure a mensagem de boas-vindas do assistente.")}</p></div></div>
-      <div class="ai-preview-suggestions">${String(draft?.suggestions_text || "").split("\n").map((item) => item.trim()).filter(Boolean).slice(0, 6).map((item) => `<span>${icon("sparkles")}${esc(item)}</span>`).join("")}</div>`;
-  }
-
-  function renderAiConfig() {
-    const ai = state.ai;
-    if (!ai.config) {
-      if (state.loading.aiConfig) return loadingState("Carregando a configuração do assistente…");
-      return aiNotice(aiError(state.errors.aiConfig || "A configuração do assistente está indisponível."), "error", "aiConfig");
-    }
-    const draft = ai.draft;
-    const disabled = ai.saving ? " disabled" : "";
-    return `<div class="ai-config-layout">
-      <form id="ai-config-form" class="ai-form-stack">
-        ${state.errors.aiConfig ? aiNotice(aiError(state.errors.aiConfig), "error", "aiConfig") : ""}
-        <section class="panel ai-settings-panel" aria-labelledby="ai-operation-title">
-          <div class="panel-head"><div><span class="eyebrow">Operação</span><h3 id="ai-operation-title">Disponibilidade e permissões</h3><p class="section-copy">A configuração é aplicada às próximas conversas no app.</p></div><span class="ai-section-icon">${icon("gauge")}</span></div>
-          <label class="ai-toggle-row" for="ai-enabled"><span><strong>Disponibilizar o assistente</strong><small>Exibe o assistente na tela inicial para os usuários.</small></span><span class="ai-switch"><input id="ai-enabled" type="checkbox" role="switch" data-ai-field="enabled"${draft.enabled ? " checked" : ""}${disabled}><span aria-hidden="true"></span></span></label>
-          <label class="ai-toggle-row" for="ai-allow-mutations"><span><strong>Permitir ajustes de rotina</strong><small>O assistente propõe alterações, e o usuário confirma antes de aplicar.</small></span><span class="ai-switch"><input id="ai-allow-mutations" type="checkbox" role="switch" data-ai-field="allow_mutations"${draft.allow_mutations ? " checked" : ""}${disabled}><span aria-hidden="true"></span></span></label>
-          <div class="ai-field-grid">
-            <div><label class="field-label" for="ai-model">Modelo de IA</label><input id="ai-model" data-ai-field="model" value="${esc(draft.model)}" maxlength="80" autocomplete="off" spellcheck="false" required aria-describedby="ai-model-hint"${disabled}><p id="ai-model-hint" class="ai-field-hint">Identificador de um modelo disponível na conta OpenAI do servidor.</p></div>
-            <div><label class="field-label" for="ai-daily-limit">Mensagens por usuário / dia</label><input id="ai-daily-limit" data-ai-field="daily_message_limit" type="number" min="1" max="500" step="1" inputmode="numeric" value="${esc(draft.daily_message_limit)}" required aria-describedby="ai-limit-hint"${disabled}><p id="ai-limit-hint" class="ai-field-hint">De 1 a 500 mensagens por conta, com controle no servidor.</p></div>
-          </div>
-        </section>
-        <section class="panel ai-settings-panel" aria-labelledby="ai-experience-title">
-          <div class="panel-head"><div><span class="eyebrow">Experiência no app</span><h3 id="ai-experience-title">Uma conversa que convida</h3><p class="section-copy">Defina a recepção e os atalhos para começar uma conversa.</p></div><span class="ai-section-icon">${icon("message")}</span></div>
-          <label class="field-label" for="ai-welcome">Mensagem de boas-vindas</label><textarea id="ai-welcome" data-ai-field="welcome_message" rows="3" maxlength="500" required${disabled}>${esc(draft.welcome_message)}</textarea>
-          <label class="field-label" for="ai-suggestions">Sugestões de conversa</label><textarea id="ai-suggestions" data-ai-field="suggestions_text" rows="4" aria-describedby="ai-suggestions-hint" required${disabled}>${esc(draft.suggestions_text)}</textarea><p id="ai-suggestions-hint" class="ai-field-hint">Uma sugestão por linha. De 1 a 6 sugestões, com até 120 caracteres cada.</p>
-        </section>
-        <section class="panel ai-settings-panel" aria-labelledby="ai-behavior-title">
-          <div class="panel-head"><div><span class="eyebrow">Comportamento</span><h3 id="ai-behavior-title">Orientações para o assistente</h3><p class="section-copy">Ajuste o tom de voz, o foco e as instruções do produto.</p></div><span class="ai-section-icon">${icon("sparkles")}</span></div>
-          <label class="field-label" for="ai-instructions">Instruções adicionais</label><textarea id="ai-instructions" data-ai-field="instructions" rows="6" maxlength="8000" placeholder="Ex.: Responda em português, seja objetivo e explique o impacto de cada ajuste."${disabled}>${esc(draft.instructions)}</textarea><p class="ai-field-hint">O isolamento dos dados por conta e a confirmação de mudanças continuam definidos pelo servidor.</p>
-        </section>
-        <div id="ai-save-error" class="ai-notice ai-notice--error" role="alert"${ai.saveError ? "" : " hidden"}>${icon("alert")}<div>${esc(ai.saveError)}</div></div>
-        <div class="ai-save-bar"><div><strong id="ai-save-label" aria-live="polite">${ai.saving ? "Salvando configuração…" : ai.dirty ? "Alterações ainda não salvas" : "Configuração sincronizada"}</strong><small>Última configuração: ${aiTime(ai.config.updated_at)}</small></div><div class="ai-save-actions"><button id="ai-reset" class="button button--secondary" type="button" data-ai-reset${ai.saving || !ai.dirty ? " disabled" : ""}>Desfazer</button><button id="ai-save" class="button button--primary" type="submit"${ai.saving || !ai.dirty ? " disabled" : ""}>${icon(ai.saving ? "loader" : "check", ai.saving ? "icon spin" : "icon")}<span>${ai.saving ? "Salvando…" : "Salvar configuração"}</span></button></div></div>
-      </form>
-      <aside class="ai-preview-column"><section class="panel ai-preview-panel"><span class="eyebrow">Prévia de conteúdo</span><h3>Boas-vindas no app</h3><p class="section-copy">Veja como sua mensagem e sugestões se conectam.</p><div id="ai-preview-content">${renderAiPreview()}</div><div class="ai-preview-footer">${icon("device")} A aparência acompanha o tema escolhido no app.</div></section>${renderAiProvider()}
-        <section class="panel ai-security-panel"><span class="ai-section-icon">${icon("shield")}</span><h3>Conexão protegida</h3><p>O servidor usa a chave cadastrada para conversar com a OpenAI. Como alternativa, pode usar o secret <code>OPENAI_API_KEY</code> configurado no ambiente da função.</p>${renderAiConnection()}<p>Os indicadores e eventos registram atividade operacional, sem expor o conteúdo das conversas.</p></section>
-      </aside>
+    return `<div class="ai-columns">
+      <div class="ai-form-stack">${renderAiReadiness()}
+        <section class="panel ai-note-panel"><span class="ai-section-icon">${icon("shield")}</span><h3>Privacidade e segurança</h3><ul><li>Cada conversa usa só os dados da conta autenticada; a identidade vem do token da sessão, nunca do corpo do pedido.</li><li>A OpenAI recebe as conversas com <code>store: false</code>. O servidor guarda apenas metadados: conta, modelo, tokens, custo, tempo e resultado.</li><li>Eventos ficam 90 dias e as cotas diárias, 30 dias.</li></ul></section>
+      </div>
+      <aside class="ai-side-stack">${renderAiProvider()}</aside>
     </div>`;
   }
 
-  function renderAiDailyChart() {
-    if (!state.ai.metrics) return emptyState("Indicadores indisponíveis", "Carregue os dados do servidor para acompanhar a atividade.", "bar-chart");
-    const daily = Array.isArray(state.ai.metrics.daily) ? state.ai.metrics.daily : [];
-    if (!daily.some((row) => asNumber(row.requests) > 0)) return emptyState("Sem chamadas no período", "A atividade aparece aqui após as primeiras conversas com o assistente.", "message");
-    const max = Math.max(...daily.map((row) => Math.max(0, asNumber(row.requests))), 1);
-    return `<div class="ai-daily-chart" role="img" aria-label="Chamadas diárias nos últimos ${state.ai.days} dias; valores disponíveis na descrição de cada barra.">${daily.map((row) => {
-      const amount = Math.max(0, asNumber(row.requests));
-      return `<div class="ai-chart-column" title="${esc(row.date)}: ${count(amount)} chamadas, ${count(row.errors)} falhas"><div class="ai-chart-track"><span style="height:${amount ? Math.max(3, Math.round(amount * 100 / max)) : 0}%"></span></div></div>`;
-    }).join("")}</div><div class="ai-chart-axis"><span>${esc(daily[0]?.date || "")}</span><span>${esc(daily[daily.length - 1]?.date || "")}</span></div><details class="ai-chart-details"><summary>Ver valores por dia</summary><div>${daily.map((row) => `<span>${esc(row.date)}<strong>${count(row.requests)} chamadas · ${count(row.errors)} falhas</strong></span>`).join("")}</div></details>`;
-  }
-
-  function renderAiEvents() {
-    if (state.loading.aiEvents && !state.ai.events) return loadingState("Carregando os eventos…");
-    if (!state.ai.events) return aiNotice(aiError(state.errors.aiEvents || "O registro de atividade está indisponível."), "error", "aiEvents");
-    if (!state.ai.events.length) return emptyState("Nenhuma atividade registrada", "Conversas e ações aparecem aqui quando o assistente começar a ser usado.", "activity");
-    const statuses = { pending: ["Aguardando", "yellow"], completed: ["Concluída", "green"], failed: ["Falha", "red"], applied: ["Aplicada", "green"], rejected: ["Recusada", "neutral"] };
-    return `<ul class="ai-event-list">${state.ai.events.map((event) => {
-      const status = statuses[event.status] || ["Desconhecido", "neutral"];
-      const isAction = event.event_type === "action";
-      const user = String(event.user_id || "");
-      const latency = event.latency_ms != null ? `${count(event.latency_ms)} ms` : "—";
-      const tokens = event.input_tokens != null || event.output_tokens != null ? count(asNumber(event.input_tokens) + asNumber(event.output_tokens)) : "—";
-      return `<li class="ai-event-row"><span class="ai-event-icon${event.status === "failed" ? " is-error" : ""}">${icon(isAction ? "check-circle" : "message")}</span><div class="ai-event-copy"><strong>${isAction ? "Ajuste de rotina" : "Conversa com o assistente"}</strong><span>${esc(event.action_type || event.model || "Modelo não informado")}${user ? ` · Conta ${esc(user.slice(0, 8))}` : ""}</span>${event.error_code ? `<small class="ai-event-error">Código: ${esc(event.error_code)}</small>` : ""}<small class="ai-event-request">ID ${esc(event.request_id || event.id || "—")}</small></div><div class="ai-event-meta"><strong>${esc(latency)}</strong><small>${tokens} tokens</small></div><div class="ai-event-status">${pill(status[0], status[1])}<small>${aiTime(event.created_at)}</small></div></li>`;
-    }).join("")}</ul>`;
-  }
-
-  function renderAiMonitoring() {
-    const metrics = state.ai.metrics;
-    return `<div class="ai-monitor-toolbar"><div><h3>Atividade do assistente</h3><p class="section-copy">Indicadores do período e os 50 eventos mais recentes.</p></div><label class="ai-period-label" for="ai-period">Período<select id="ai-period" class="toolbar-select"${state.loading.aiMetrics ? " disabled" : ""}>${[7, 30, 90].map((days) => `<option value="${days}"${state.ai.days === days ? " selected" : ""}>Últimos ${days} dias</option>`).join("")}</select></label></div>
-      ${state.errors.aiMetrics ? aiNotice(aiError(state.errors.aiMetrics), "error", "aiMetrics") : ""}
-      <div class="metric-grid ai-metric-grid">
-        ${metricCard("Chamadas", aiMetric("total_requests"), "Conversas iniciadas no período", "blue", "message")}
-        ${metricCard("Usuários ativos", aiMetric("active_users"), "Contas que usaram o assistente", "purple", "users")}
-        ${metricCard("Ações aplicadas", aiMetric("actions_applied"), "Ajustes confirmados pelo usuário", "green", "check-circle")}
-        ${metricCard("Falhas", aiMetric("failed_requests"), "Chamadas que não concluíram", "red", "alert")}
-      </div>
-      <div class="ai-monitor-grid"><section class="panel"><div class="panel-head"><div><h3>Conversas ao longo do tempo</h3><p class="section-copy">Chamadas por dia nos últimos ${state.ai.days} dias.</p></div><span class="ai-section-icon">${icon("bar-chart")}</span></div>${state.loading.aiMetrics && !metrics ? loadingState("Consultando os indicadores…") : renderAiDailyChart()}</section><section class="panel ai-operational-panel"><h3>Saúde da operação</h3><dl><div><dt>Chamadas concluídas</dt><dd>${aiMetric("successful_requests")}</dd></div><div><dt>Latência média</dt><dd>${aiMetric("avg_latency_ms", " ms")}</dd></div><div><dt>Tokens processados</dt><dd>${aiMetric("total_tokens")}</dd></div><div><dt>Ações propostas</dt><dd>${aiMetric("actions_proposed")}</dd></div><div><dt>Ações recusadas</dt><dd>${aiMetric("actions_rejected")}</dd></div><div><dt>Última chamada</dt><dd>${aiTime(metrics?.last_request_at)}</dd></div></dl><p class="ai-field-hint">Sem valores significa que os dados ainda não estão disponíveis. A chave e a função são verificadas pelo servidor durante cada chamada.</p></section></div>
-      <section class="panel ai-events-panel"><div class="panel-head"><div><h3>Registro de atividade</h3><p class="section-copy">Metadados de conversas e ações. Mensagens pessoais não são exibidas.</p></div><button type="button" class="button button--secondary button--compact" data-ai-retry="aiEvents"${state.loading.aiEvents ? " disabled" : ""}>${icon("refresh", state.loading.aiEvents ? "icon spin" : "icon")} Atualizar</button></div>${state.errors.aiEvents && state.ai.events ? aiNotice(aiError(state.errors.aiEvents), "error", "aiEvents") : ""}${renderAiEvents()}</section>`;
+  /* Página ------------------------------------------------------------------ */
+  function renderAiSaveBar() {
+    const ai = state.ai;
+    if (!ai.config || !ai.draft) return "";
+    if (!["model", "experience"].includes(ai.tab) && !ai.dirty) return "";
+    return `<div id="ai-save-error" class="ai-notice ai-notice--error ai-save-error" role="alert"${ai.saveError ? "" : " hidden"}>${icon("alert")}<div>${esc(ai.saveError)}</div></div>
+      <div class="ai-save-bar${ai.dirty || ai.saving ? "" : " is-clean"}"><div><strong id="ai-save-label" aria-live="polite">${ai.saving ? "Salvando configuração…" : ai.dirty ? "Alterações ainda não salvas" : "Configuração sincronizada"}</strong><small>Última alteração: ${aiTime(ai.config.updated_at)}</small></div><div class="ai-save-actions"><button id="ai-reset" class="button button--secondary" type="button" data-ai-reset${ai.saving || !ai.dirty ? " disabled" : ""}>Desfazer</button><button id="ai-save" class="button button--primary" type="button" data-ai-save${ai.saving || !ai.dirty ? " disabled" : ""}>${icon(ai.saving ? "loader" : "check", ai.saving ? "icon spin" : "icon")}<span>${ai.saving ? "Salvando…" : "Salvar alterações"}</span></button></div></div>`;
   }
 
   function renderAiAssistant() {
-    const config = state.ai.config;
-    return `<section class="ai-hero"><div class="ai-hero-mark">${icon("sparkles")}</div><div class="ai-hero-copy"><span class="eyebrow">Inteligência a serviço da rotina</span><h2>Gain Assistente</h2><p>Uma ajuda próxima de cada usuário. Você define a experiência e acompanha o que acontece.</p></div><div class="ai-hero-state">${config ? pill(config.enabled ? "Disponibilizado no app" : "Desativado no app", config.enabled ? "green" : "neutral") : pill(state.loading.aiConfig ? "Carregando configuração" : "Servidor pendente", "yellow")}<small>${config ? esc(config.model || "Modelo não definido") : "Conexão segura com o servidor"}</small>${config ? `<button type="button" class="button button--secondary button--compact" data-ai-key-settings>${icon("key")} Gerenciar chave</button>` : ""}</div></section>
-      <div class="ai-tabs" role="tablist" aria-label="Seções do assistente"><button id="ai-tab-config" type="button" role="tab" data-ai-tab="config" aria-controls="ai-tab-panel" aria-selected="${state.ai.tab === "config"}" tabindex="${state.ai.tab === "config" ? 0 : -1}">${icon("gauge")}Configuração</button><button id="ai-tab-monitor" type="button" role="tab" data-ai-tab="monitor" aria-controls="ai-tab-panel" aria-selected="${state.ai.tab === "monitor"}" tabindex="${state.ai.tab === "monitor" ? 0 : -1}">${icon("activity")}Monitoramento</button></div>
-      <div id="ai-tab-panel" role="tabpanel" aria-labelledby="ai-tab-${state.ai.tab}" tabindex="0">${state.ai.tab === "monitor" ? renderAiMonitoring() : renderAiConfig()}</div>`;
+    const renderers = { overview: renderAiOverview, model: renderAiModelTab, experience: renderAiExperience, activity: renderAiActivity, connection: renderAiConnection };
+    return `${renderAiHero()}${renderAiAlerts()}${renderAiTabs()}
+      <div id="ai-tab-panel" class="ai-tab-panel" role="tabpanel" aria-labelledby="ai-tab-${state.ai.tab}" tabindex="0">${(renderers[state.ai.tab] || renderAiOverview)()}</div>${renderAiSaveBar()}`;
   }
 
   function onAiInput(target) {
     const field = target.dataset.aiField;
     if (!field || !state.ai.draft || state.ai.saving || !Object.hasOwn(state.ai.draft, field)) return;
     state.ai.draft[field] = target.type === "checkbox" ? target.checked : target.value;
+    /* Sem orçamento não há o que pausar: a chave do limite rígido acompanha o campo. */
+    if (field === "monthly_budget_usd") {
+      const empty = !target.value.trim();
+      if (empty) state.ai.draft.budget_hard_limit = false;
+      const hard = $("ai-budget-hard");
+      if (hard) { hard.disabled = empty || state.ai.saving; if (empty) hard.checked = false; }
+    }
     state.ai.dirty = JSON.stringify(state.ai.draft) !== JSON.stringify(aiDraft(state.ai.config));
     state.ai.saveError = "";
+    /* O modelo escolhido muda o cartão selecionado e a aba: redesenha tudo. */
+    if (field === "model") return renderCurrentPage();
     if ($("ai-save-error")) $("ai-save-error").hidden = true;
     if ($("ai-save-label")) $("ai-save-label").textContent = state.ai.dirty ? "Alterações ainda não salvas" : "Configuração sincronizada";
+    document.querySelector(".ai-save-bar")?.classList.toggle("is-clean", !state.ai.dirty);
     if ($("ai-save")) $("ai-save").disabled = !state.ai.dirty;
     if ($("ai-reset")) $("ai-reset").disabled = !state.ai.dirty;
     if (["welcome_message", "suggestions_text"].includes(field) && $("ai-preview-content")) $("ai-preview-content").innerHTML = renderAiPreview();
@@ -2873,13 +3328,23 @@
     if (ai.saving || !ai.dirty || !ai.draft || !ai.config) return;
     const draft = ai.draft;
     const config = { enabled: draft.enabled, allow_mutations: draft.allow_mutations, model: draft.model.trim(), daily_message_limit: Number(draft.daily_message_limit), instructions: draft.instructions.trim(), welcome_message: draft.welcome_message.trim(), suggestions: draft.suggestions_text.split("\n").map((line) => line.trim()).filter(Boolean) };
+    const budgetText = String(draft.monthly_budget_usd).trim().replace(/\s/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".");
+    const budget = budgetText === "" ? null : Number(budgetText);
+    /* O servidor sem a migração de custos não conhece estes campos. */
+    if (Object.hasOwn(ai.config, "budget_hard_limit")) Object.assign(config, { monthly_budget_usd: budget, budget_hard_limit: budget != null && draft.budget_hard_limit });
     let error = "";
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(config.model)) error = "Informe um identificador válido para o modelo de IA (até 80 caracteres).";
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(config.model)) error = "Escolha um modelo da lista.";
     else if (!Number.isInteger(config.daily_message_limit) || config.daily_message_limit < 1 || config.daily_message_limit > 500) error = "O limite diário deve ser um número inteiro entre 1 e 500.";
     else if (!config.welcome_message || config.welcome_message.length > 500) error = "A mensagem de boas-vindas deve ter entre 1 e 500 caracteres.";
     else if (config.instructions.length > 8000) error = "As instruções devem ter até 8.000 caracteres.";
     else if (!config.suggestions.length || config.suggestions.length > 6 || config.suggestions.some((item) => item.length > 120)) error = "Use de 1 a 6 sugestões, cada uma com até 120 caracteres.";
+    else if (budget != null && (!Number.isFinite(budget) || budget < 0.01 || budget > 100000)) error = "O orçamento deve ficar entre US$ 0,01 e US$ 100.000, ou em branco para não limitar.";
     if (error) { ai.saveError = error; renderCurrentPage(); $("ai-save-error")?.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
+    if (config.model !== ai.config.model) {
+      const next = aiModelInfo(config.model);
+      const ok = await askConfirm({ title: "Trocar o modelo do assistente?", message: `As próximas conversas de todos os usuários passam a usar o ${next?.label || config.model}. Conversas em andamento terminam com o modelo atual.`, label: "Trocar modelo", extra: ai.available?.ok && !ai.available.models.includes(config.model) ? `<p class="ai-confirm-warning">A chave cadastrada não lista este modelo. As conversas vão falhar até o acesso ser liberado na OpenAI.</p>` : "" });
+      if (!ok) return;
+    }
     state.sequence.aiConfig = (state.sequence.aiConfig || 0) + 1; state.loading.aiConfig = false;
     ai.saving = true; ai.saveError = ""; renderCurrentPage();
     try {
@@ -2887,7 +3352,8 @@
       if (!result.config || typeof result.config !== "object") throw new Error("O servidor não confirmou a configuração. Atualize os dados antes de tentar novamente.");
       ai.config = result.config; ai.draft = aiDraft(result.config); ai.dirty = false; ai.savedAt = Date.now();
       delete state.errors.aiConfig;
-      toast("Configuração do assistente salva", "success", "As próximas conversas já recebem os novos ajustes.");
+      toast("Configuração do assistente salva", "success", "As próximas conversas já usam os novos ajustes.");
+      loadAiModels({ quiet: true }); loadAiMetrics({ quiet: true });
     } catch (error) {
       ai.saveError = aiError(error?.message || String(error));
       toast("Não foi possível salvar", "error", ai.saveError);
@@ -2943,7 +3409,7 @@
   function renderCurrentPage() {
     if (els.app.hidden) return;
     const active = document.activeElement;
-    const providerInput = state.page === "assistant" && state.ai.tab === "config" ? $("ai-provider-key") : null;
+    const providerInput = state.page === "assistant" && state.ai.tab === "connection" ? $("ai-provider-key") : null;
     const providerFocused = providerInput && active === providerInput;
     const aiFocus = state.page === "assistant" && active?.matches("[data-ai-field]") ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
     const renderers = { overview: renderOverview, users: renderUsers, diagnostics: renderDiagnostics, traces: renderTraces, analytics: renderAnalytics, versions: renderVersions, news: renderNews, assistant: renderAiAssistant, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
@@ -2972,7 +3438,7 @@
   }
 
   function retryResource(resource) {
-    const loaders = { devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, traces: loadTraces, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
+    const loaders = { devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, traces: loadTraces, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
     loaders[resource]?.();
   }
 
@@ -2987,9 +3453,14 @@
     if (!target) return;
     if (target.dataset.nav) return setPage(target.dataset.nav);
     if (target.dataset.retry) return retryResource(target.dataset.retry);
-    if (target.hasAttribute("data-ai-key-settings")) { state.ai.tab = "config"; renderCurrentPage(); $("ai-provider-key")?.focus(); return; }
-    if (target.dataset.aiTab && ["config", "monitor"].includes(target.dataset.aiTab)) { state.ai.tab = target.dataset.aiTab; renderCurrentPage(); $(`ai-tab-${state.ai.tab}`)?.focus({ preventScroll: true }); return; }
+    if (target.dataset.aiTab) return setAiTab(target.dataset.aiTab, true);
+    if (target.dataset.aiGo) { setAiTab(target.dataset.aiGo); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     if (target.dataset.aiRetry) return retryResource(target.dataset.aiRetry);
+    if (target.dataset.aiProbe) return probeAiModel(target.dataset.aiProbe);
+    if (target.dataset.aiChart) { state.ai.chart = target.dataset.aiChart === "requests" ? "requests" : "cost"; return renderCurrentPage(); }
+    if (target.dataset.aiEvents) { state.ai.eventFilter = ["chat", "action", "failed"].includes(target.dataset.aiEvents) ? target.dataset.aiEvents : "all"; return renderCurrentPage(); }
+    if (target.hasAttribute("data-ai-check-all")) { loadAiHealth(); loadAiAvailability(); return; }
+    if (target.hasAttribute("data-ai-save")) return saveAiConfig();
     if (target.hasAttribute("data-ai-reset") && !state.ai.saving) { state.ai.draft = aiDraft(state.ai.config); state.ai.dirty = false; state.ai.saveError = ""; return renderCurrentPage(); }
     if (target.dataset.userScope) { state.userFilter.scope = target.dataset.userScope; return renderCurrentPage(); }
     if (target.dataset.openUser) return openUser(target.dataset.openUser);
@@ -3069,12 +3540,12 @@
   }, true);
 
   els.page.addEventListener("keydown", (event) => {
-    if (event.target.matches("[data-ai-tab]") && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+    if (event.target.matches("[role=tab][data-ai-tab]") && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
       event.preventDefault();
-      state.ai.tab = event.key === "Home" ? "config" : event.key === "End" ? "monitor" : state.ai.tab === "config" ? "monitor" : "config";
-      renderCurrentPage(); $(`ai-tab-${state.ai.tab}`)?.focus({ preventScroll: true }); return;
-    }
-    if (event.target.id !== "broadcast-message") return;
+      const index = AI_TAB_IDS.indexOf(state.ai.tab), last = AI_TAB_IDS.length - 1;
+      const next = event.key === "Home" ? 0 : event.key === "End" ? last : event.key === "ArrowRight" ? (index + 1) % (last + 1) : (index + last) % (last + 1);
+      return setAiTab(AI_TAB_IDS[next], true);
+    }    if (event.target.id !== "broadcast-message") return;
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       if (!$("broadcast-send")?.disabled) sendBroadcast();
@@ -3083,7 +3554,7 @@
 
   els.page.addEventListener("change", (event) => {
     if (event.target.dataset.aiField) return onAiInput(event.target);
-    if (event.target.id === "ai-period") { state.ai.days = [7, 30, 90].includes(Number(event.target.value)) ? Number(event.target.value) : 30; state.ai.metrics = null; return loadAiMetrics(); }
+    if (event.target.id === "ai-period") { state.ai.days = [7, 30, 90].includes(Number(event.target.value)) ? Number(event.target.value) : 30; return loadAiMetrics(); }
     if (event.target.id === "broadcast-file") {
       const file = event.target.files?.[0];
       event.target.value = "";
