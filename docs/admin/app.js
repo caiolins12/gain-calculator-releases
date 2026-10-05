@@ -15,6 +15,7 @@
     analytics: { eyebrow: "Produto", title: "Uso e adoção", description: "Alcance, estados das solicitações e comportamento dentro do produto." },
     versions: { eyebrow: "Produto", title: "Versões", description: "Release publicada, adoção instalada e contas que precisam atualizar." },
     news: { eyebrow: "Produto", title: "Novidades", description: "Cards e janelas da seção Novidades da tela inicial do app." },
+    assistant: { eyebrow: "Produto", title: "Assistente IA", description: "Controle o comportamento, acompanhe o uso e gerencie as ações do assistente." },
     services: { eyebrow: "Serviços", title: "Status dos serviços", description: "Disponibilidade e latência das dependências críticas do app." },
     whatsapp: { eyebrow: "Serviços", title: "WhatsApp", description: "Conexão da Evolution API e desempenho das verificações de telefone." },
     broadcast: { eyebrow: "Serviços", title: "Comunicados", description: "Envio controlado de mensagens para números verificados ou uma lista manual." }
@@ -41,6 +42,7 @@
     traces: null,
     versions: null,
     news: null,
+    ai: { config: null, draft: null, dirty: false, saving: false, tab: "config", days: 30, metrics: null, events: null, health: null, provider: null, providerSaving: false, providerError: "", saveError: "", savedAt: null },
     now: Date.now(),
     serverNow: null,
     lastUpdated: null,
@@ -513,6 +515,11 @@
     button.disabled = true;
     button.querySelector("svg")?.classList.add("spin");
     try {
+      if (state.page === "assistant") {
+        await loadAiAssistant({ quiet: true });
+        if (["aiConfig", "aiMetrics", "aiEvents", "aiProvider"].some((name) => state.errors[name])) return toast("Atualização incompleta", "error", "Confira os avisos do assistente. Suas alterações foram preservadas.");
+        return toast("Assistente atualizado", "success", state.ai.dirty ? "Suas alterações em edição foram preservadas." : "Configuração e monitoramento sincronizados.");
+      }
       const loaders = {
         overview: () => Promise.allSettled([loadDevices({ quiet: true }), loadStatistics({ quiet: true }), loadDiagnostics({ quiet: true }), loadHealth({ quiet: true })]),
         users: () => Promise.allSettled([loadDevices({ quiet: true }), loadVersions({ quiet: true })]),
@@ -564,6 +571,7 @@
     if (["users", "versions"].includes(page) && !state.versions && !state.loading.versions) loadVersions();
     if (page === "traces" && !state.traces && !state.loading.traces) loadTraces();
     if (page === "news" && !state.news && !state.loading.news) loadNews();
+    if (page === "assistant" && !state.ai.config && !state.loading.aiConfig) loadAiAssistant();
     if (page === "services") {
       if (!state.health && !state.loading.health) loadHealth();
       state.timers.health = setInterval(() => { if (state.page === "services") loadHealth({ quiet: true }); }, 15_000);
@@ -2623,6 +2631,264 @@
     }
   }
 
+  /* Assistente IA -------------------------------------------------------- */
+  function aiResponse(result) {
+    if (!result || result.success === false || (result.status && result.status !== "ok")) {
+      const code = result?.error || result?.message;
+      throw new Error(code === "forbidden" ? "Sua conta não tem permissão para gerenciar o assistente." : code === "invalid_config" ? "A configuração foi recusada. Confira os limites dos campos." : code || "O servidor não retornou uma resposta válida.");
+    }
+    return result;
+  }
+
+  function aiError(message) {
+    const text = String(message || "Não foi possível consultar o servidor.");
+    return /PGRST202|schema cache|Could not find.*function|does not exist/i.test(text)
+      ? "O módulo de IA ainda não está disponível no servidor. Aplique a migração e publique a função gain-assistant para habilitar esta seção."
+      : text;
+  }
+
+  function aiDraft(config) {
+    return {
+      enabled: config.enabled === true, allow_mutations: config.allow_mutations === true,
+      model: String(config.model || "gpt-5-mini"), daily_message_limit: String(config.daily_message_limit ?? 30),
+      instructions: String(config.instructions || ""), welcome_message: String(config.welcome_message || ""),
+      suggestions_text: (Array.isArray(config.suggestions) ? config.suggestions : []).map(String).join("\n")
+    };
+  }
+
+  function loadAiConfig(options = {}) {
+    return loadResource("aiConfig", () => rpc("admin_get_ai_assistant_config"), (result) => {
+      const config = aiResponse(result).config;
+      if (!config || typeof config !== "object") throw new Error("O servidor não retornou a configuração do assistente.");
+      state.ai.config = config;
+      if (!state.ai.dirty && !state.ai.saving) state.ai.draft = aiDraft(config);
+    }, options);
+  }
+
+  function loadAiMetrics(options = {}) {
+    const days = state.ai.days;
+    return loadResource("aiMetrics", () => rpc("admin_ai_assistant_metrics", { p_days: days }), (result) => {
+      const metrics = aiResponse(result);
+      if (!Number.isFinite(Number(metrics.total_requests)) || metrics.total_requests == null) throw new Error("O servidor não retornou indicadores válidos.");
+      state.ai.metrics = metrics;
+    }, options);
+  }
+
+  function loadAiEvents(options = {}) {
+    return loadResource("aiEvents", () => rpc("admin_list_ai_assistant_events", { p_limit: 50 }), (result) => {
+      const events = aiResponse(result).items;
+      if (!Array.isArray(events)) throw new Error("O servidor não retornou o registro de atividade.");
+      state.ai.events = events;
+    }, options);
+  }
+
+  function loadAiAssistant(options = {}) {
+    return Promise.allSettled([loadAiConfig(options), loadAiMetrics(options), loadAiEvents(options), loadAiProvider(options)]);
+  }
+
+  function loadAiProvider(options = {}) {
+    return loadResource("aiProvider", () => rpc("admin_ai_assistant_provider_status"), (result) => {
+      const provider = aiResponse(result);
+      if (typeof provider.configured !== "boolean") throw new Error("O servidor não retornou o estado da chave do assistente.");
+      state.ai.provider = { configured: provider.configured, key_last4: String(provider.key_last4 || "").slice(-4), updated_at: provider.updated_at };
+    }, options);
+  }
+
+  function renderAiProvider() {
+    const ai = state.ai, provider = ai.provider;
+    const last4 = /^[a-zA-Z0-9_-]{1,4}$/.test(provider?.key_last4 || "") ? provider.key_last4 : "";
+    return `<section class="panel ai-security-panel ai-provider-panel"><span class="ai-section-icon">${icon("key")}</span><h3>Chave da OpenAI</h3><p>Cadastre ou troque a chave usada pelo assistente. Ela é enviada ao servidor por conexão autenticada e armazenada com criptografia.</p>
+      <div class="ai-provider-status">${provider ? `${pill(provider.configured ? "Chave cadastrada" : "Cadastro pendente", provider.configured ? "green" : "yellow")}${provider.configured && last4 ? `<span class="ai-masked-key">•••• ${esc(last4)}</span>` : ""}<small>${provider.updated_at ? `Atualizada em ${aiTime(provider.updated_at)}` : "Nenhuma chave cadastrada"}</small>` : `<small>${state.loading.aiProvider ? "Consultando o cadastro…" : "Cadastro ainda não verificado"}</small>`}</div>
+      ${state.errors.aiProvider ? `<div class="ai-connection-warning is-error" role="alert">${esc(aiError(state.errors.aiProvider))}</div><button type="button" class="button button--secondary button--compact ai-connection-check" data-ai-retry="aiProvider">Atualizar cadastro</button>` : ""}
+      <form id="ai-provider-form" autocomplete="off"><label class="field-label" for="ai-provider-key">${provider?.configured ? "Nova chave de API" : "Chave de API"}</label><input id="ai-provider-key" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" placeholder="sk-…" minlength="20" maxlength="512" required aria-describedby="ai-key-hint"${ai.providerSaving ? " disabled" : ""}><p id="ai-key-hint" class="ai-field-hint">A chave completa nunca é exibida pelo painel nem salva neste navegador.</p>
+        ${ai.providerError ? `<div class="ai-connection-warning is-error" role="alert">${esc(ai.providerError)}</div>` : ""}
+        <button id="ai-provider-save" type="submit" class="button button--primary ai-connection-check" disabled>${icon(ai.providerSaving ? "loader" : "shield", ai.providerSaving ? "icon spin" : "icon")} ${ai.providerSaving ? "Salvando chave…" : provider?.configured ? "Trocar chave" : "Salvar chave"}</button></form></section>`;
+  }
+
+  async function saveAiProvider() {
+    const ai = state.ai, input = $("ai-provider-key");
+    if (ai.providerSaving || !input) return;
+    const key = input.value.trim();
+    if (!/^sk-[a-zA-Z0-9_-]{17,509}$/.test(key)) {
+      ai.providerError = "Informe uma chave OpenAI válida, começando com sk-.";
+      input.value = ""; renderCurrentPage(); return;
+    }
+    input.value = "";
+    ai.providerSaving = true; ai.providerError = ""; renderCurrentPage();
+    try {
+      const result = aiResponse(await rpc("admin_set_ai_assistant_provider_key", { p_key: key }));
+      if (result.configured === true) ai.provider = { configured: true, key_last4: String(result.key_last4 || "").slice(-4), updated_at: result.updated_at };
+      else await loadAiProvider({ quiet: true });
+      delete state.errors.aiProvider;
+      ai.health = null;
+      toast("Chave do assistente salva", "success", "A chave foi protegida no servidor. Verifique a conexão para conferir a disponibilidade.");
+    } catch {
+      ai.providerError = "Não foi possível salvar a chave. Confira a conexão, sua permissão administrativa e a disponibilidade do módulo no servidor.";
+      toast("Não foi possível salvar a chave", "error", "O campo foi limpo por segurança. Tente novamente quando o serviço estiver disponível.");
+    } finally {
+      if ($("ai-provider-key")) $("ai-provider-key").value = "";
+      ai.providerSaving = false; renderCurrentPage();
+    }
+  }
+
+  function loadAiHealth(options = {}) {
+    return loadResource("aiHealth", () => requestJson(`${SUPABASE_URL}/functions/v1/gain-assistant`, { method: "POST", body: JSON.stringify({ operation: "config" }) }), (result) => {
+      if (typeof result?.provider_ready !== "boolean") throw new Error("A função respondeu sem informar a disponibilidade da chave. Confira a versão publicada no servidor.");
+      state.ai.health = { providerReady: result.provider_ready, checkedAt: Date.now() };
+    }, options);
+  }
+
+  function renderAiConnection() {
+    const health = state.ai.health;
+    return `<div class="ai-connection-status">${health ? `<div>${pill("Serviço conectado", "green")}${pill(health.providerReady ? "Chave configurada" : "Chave pendente", health.providerReady ? "green" : "yellow")}</div><small>Verificado em ${dateTime(health.checkedAt)}</small>` : `<small>Conexão ainda não verificada</small>`}</div>
+      ${health && !health.providerReady ? `<div class="ai-connection-warning">Cadastre a chave no cartão acima para liberar as respostas do assistente.</div>` : ""}
+      ${state.errors.aiHealth ? `<div class="ai-connection-warning is-error" role="alert">${esc(aiError(state.errors.aiHealth))}</div>` : ""}
+      <button type="button" class="button button--secondary button--compact ai-connection-check" data-ai-retry="aiHealth"${state.loading.aiHealth ? " disabled" : ""}>${icon(state.loading.aiHealth ? "loader" : "activity", state.loading.aiHealth ? "icon spin" : "icon")} ${state.loading.aiHealth ? "Verificando…" : "Verificar conexão"}</button><p>A verificação confirma a função e a presença da chave. A disponibilidade do modelo e a cota são avaliadas durante as conversas.</p>`;
+  }
+
+  function aiTime(value) {
+    const timestamp = typeof value === "number" ? value : Date.parse(value);
+    return Number.isFinite(timestamp) ? dateTime(timestamp) : "—";
+  }
+
+  function aiMetric(name, suffix = "") {
+    const value = state.ai.metrics?.[name];
+    return value != null && Number.isFinite(Number(value)) ? `${count(value)}${suffix}` : "—";
+  }
+
+  function aiNotice(message, tone = "warning", retry = "") {
+    return `<div class="ai-notice ai-notice--${tone}" role="${tone === "error" ? "alert" : "status"}">${icon(tone === "error" ? "alert" : "shield")}<div>${esc(message)}</div>${retry ? `<button type="button" class="button button--secondary button--compact" data-ai-retry="${esc(retry)}">Tentar novamente</button>` : ""}</div>`;
+  }
+
+  function renderAiPreview() {
+    const draft = state.ai.draft;
+    return `<div class="ai-preview-chat"><div class="ai-preview-avatar">${icon("sparkles")}</div><div class="ai-preview-bubble"><strong>Gain Assistente</strong><p>${esc(draft?.welcome_message || "Configure a mensagem de boas-vindas do assistente.")}</p></div></div>
+      <div class="ai-preview-suggestions">${String(draft?.suggestions_text || "").split("\n").map((item) => item.trim()).filter(Boolean).slice(0, 6).map((item) => `<span>${icon("sparkles")}${esc(item)}</span>`).join("")}</div>`;
+  }
+
+  function renderAiConfig() {
+    const ai = state.ai;
+    if (!ai.config) {
+      if (state.loading.aiConfig) return loadingState("Carregando a configuração do assistente…");
+      return aiNotice(aiError(state.errors.aiConfig || "A configuração do assistente está indisponível."), "error", "aiConfig");
+    }
+    const draft = ai.draft;
+    const disabled = ai.saving ? " disabled" : "";
+    return `<div class="ai-config-layout">
+      <form id="ai-config-form" class="ai-form-stack">
+        ${state.errors.aiConfig ? aiNotice(aiError(state.errors.aiConfig), "error", "aiConfig") : ""}
+        <section class="panel ai-settings-panel" aria-labelledby="ai-operation-title">
+          <div class="panel-head"><div><span class="eyebrow">Operação</span><h3 id="ai-operation-title">Disponibilidade e permissões</h3><p class="section-copy">A configuração é aplicada às próximas conversas no app.</p></div><span class="ai-section-icon">${icon("gauge")}</span></div>
+          <label class="ai-toggle-row" for="ai-enabled"><span><strong>Disponibilizar o assistente</strong><small>Exibe o assistente na tela inicial para os usuários.</small></span><span class="ai-switch"><input id="ai-enabled" type="checkbox" role="switch" data-ai-field="enabled"${draft.enabled ? " checked" : ""}${disabled}><span aria-hidden="true"></span></span></label>
+          <label class="ai-toggle-row" for="ai-allow-mutations"><span><strong>Permitir ajustes de rotina</strong><small>O assistente propõe alterações, e o usuário confirma antes de aplicar.</small></span><span class="ai-switch"><input id="ai-allow-mutations" type="checkbox" role="switch" data-ai-field="allow_mutations"${draft.allow_mutations ? " checked" : ""}${disabled}><span aria-hidden="true"></span></span></label>
+          <div class="ai-field-grid">
+            <div><label class="field-label" for="ai-model">Modelo de IA</label><input id="ai-model" data-ai-field="model" value="${esc(draft.model)}" maxlength="80" autocomplete="off" spellcheck="false" required aria-describedby="ai-model-hint"${disabled}><p id="ai-model-hint" class="ai-field-hint">Identificador de um modelo disponível na conta OpenAI do servidor.</p></div>
+            <div><label class="field-label" for="ai-daily-limit">Mensagens por usuário / dia</label><input id="ai-daily-limit" data-ai-field="daily_message_limit" type="number" min="1" max="500" step="1" inputmode="numeric" value="${esc(draft.daily_message_limit)}" required aria-describedby="ai-limit-hint"${disabled}><p id="ai-limit-hint" class="ai-field-hint">De 1 a 500 mensagens por conta, com controle no servidor.</p></div>
+          </div>
+        </section>
+        <section class="panel ai-settings-panel" aria-labelledby="ai-experience-title">
+          <div class="panel-head"><div><span class="eyebrow">Experiência no app</span><h3 id="ai-experience-title">Uma conversa que convida</h3><p class="section-copy">Defina a recepção e os atalhos para começar uma conversa.</p></div><span class="ai-section-icon">${icon("message")}</span></div>
+          <label class="field-label" for="ai-welcome">Mensagem de boas-vindas</label><textarea id="ai-welcome" data-ai-field="welcome_message" rows="3" maxlength="500" required${disabled}>${esc(draft.welcome_message)}</textarea>
+          <label class="field-label" for="ai-suggestions">Sugestões de conversa</label><textarea id="ai-suggestions" data-ai-field="suggestions_text" rows="4" aria-describedby="ai-suggestions-hint" required${disabled}>${esc(draft.suggestions_text)}</textarea><p id="ai-suggestions-hint" class="ai-field-hint">Uma sugestão por linha. De 1 a 6 sugestões, com até 120 caracteres cada.</p>
+        </section>
+        <section class="panel ai-settings-panel" aria-labelledby="ai-behavior-title">
+          <div class="panel-head"><div><span class="eyebrow">Comportamento</span><h3 id="ai-behavior-title">Orientações para o assistente</h3><p class="section-copy">Ajuste o tom de voz, o foco e as instruções do produto.</p></div><span class="ai-section-icon">${icon("sparkles")}</span></div>
+          <label class="field-label" for="ai-instructions">Instruções adicionais</label><textarea id="ai-instructions" data-ai-field="instructions" rows="6" maxlength="8000" placeholder="Ex.: Responda em português, seja objetivo e explique o impacto de cada ajuste."${disabled}>${esc(draft.instructions)}</textarea><p class="ai-field-hint">O isolamento dos dados por conta e a confirmação de mudanças continuam definidos pelo servidor.</p>
+        </section>
+        <div id="ai-save-error" class="ai-notice ai-notice--error" role="alert"${ai.saveError ? "" : " hidden"}>${icon("alert")}<div>${esc(ai.saveError)}</div></div>
+        <div class="ai-save-bar"><div><strong id="ai-save-label" aria-live="polite">${ai.saving ? "Salvando configuração…" : ai.dirty ? "Alterações ainda não salvas" : "Configuração sincronizada"}</strong><small>Última configuração: ${aiTime(ai.config.updated_at)}</small></div><div class="ai-save-actions"><button id="ai-reset" class="button button--secondary" type="button" data-ai-reset${ai.saving || !ai.dirty ? " disabled" : ""}>Desfazer</button><button id="ai-save" class="button button--primary" type="submit"${ai.saving || !ai.dirty ? " disabled" : ""}>${icon(ai.saving ? "loader" : "check", ai.saving ? "icon spin" : "icon")}<span>${ai.saving ? "Salvando…" : "Salvar configuração"}</span></button></div></div>
+      </form>
+      <aside class="ai-preview-column"><section class="panel ai-preview-panel"><span class="eyebrow">Prévia de conteúdo</span><h3>Boas-vindas no app</h3><p class="section-copy">Veja como sua mensagem e sugestões se conectam.</p><div id="ai-preview-content">${renderAiPreview()}</div><div class="ai-preview-footer">${icon("device")} A aparência acompanha o tema escolhido no app.</div></section>${renderAiProvider()}
+        <section class="panel ai-security-panel"><span class="ai-section-icon">${icon("shield")}</span><h3>Conexão protegida</h3><p>O servidor usa a chave cadastrada para conversar com a OpenAI. Como alternativa, pode usar o secret <code>OPENAI_API_KEY</code> configurado no ambiente da função.</p>${renderAiConnection()}<p>Os indicadores e eventos registram atividade operacional, sem expor o conteúdo das conversas.</p></section>
+      </aside>
+    </div>`;
+  }
+
+  function renderAiDailyChart() {
+    if (!state.ai.metrics) return emptyState("Indicadores indisponíveis", "Carregue os dados do servidor para acompanhar a atividade.", "bar-chart");
+    const daily = Array.isArray(state.ai.metrics.daily) ? state.ai.metrics.daily : [];
+    if (!daily.some((row) => asNumber(row.requests) > 0)) return emptyState("Sem chamadas no período", "A atividade aparece aqui após as primeiras conversas com o assistente.", "message");
+    const max = Math.max(...daily.map((row) => Math.max(0, asNumber(row.requests))), 1);
+    return `<div class="ai-daily-chart" role="img" aria-label="Chamadas diárias nos últimos ${state.ai.days} dias; valores disponíveis na descrição de cada barra.">${daily.map((row) => {
+      const amount = Math.max(0, asNumber(row.requests));
+      return `<div class="ai-chart-column" title="${esc(row.date)}: ${count(amount)} chamadas, ${count(row.errors)} falhas"><div class="ai-chart-track"><span style="height:${amount ? Math.max(3, Math.round(amount * 100 / max)) : 0}%"></span></div></div>`;
+    }).join("")}</div><div class="ai-chart-axis"><span>${esc(daily[0]?.date || "")}</span><span>${esc(daily[daily.length - 1]?.date || "")}</span></div><details class="ai-chart-details"><summary>Ver valores por dia</summary><div>${daily.map((row) => `<span>${esc(row.date)}<strong>${count(row.requests)} chamadas · ${count(row.errors)} falhas</strong></span>`).join("")}</div></details>`;
+  }
+
+  function renderAiEvents() {
+    if (state.loading.aiEvents && !state.ai.events) return loadingState("Carregando os eventos…");
+    if (!state.ai.events) return aiNotice(aiError(state.errors.aiEvents || "O registro de atividade está indisponível."), "error", "aiEvents");
+    if (!state.ai.events.length) return emptyState("Nenhuma atividade registrada", "Conversas e ações aparecem aqui quando o assistente começar a ser usado.", "activity");
+    const statuses = { pending: ["Aguardando", "yellow"], completed: ["Concluída", "green"], failed: ["Falha", "red"], applied: ["Aplicada", "green"], rejected: ["Recusada", "neutral"] };
+    return `<ul class="ai-event-list">${state.ai.events.map((event) => {
+      const status = statuses[event.status] || ["Desconhecido", "neutral"];
+      const isAction = event.event_type === "action";
+      const user = String(event.user_id || "");
+      const latency = event.latency_ms != null ? `${count(event.latency_ms)} ms` : "—";
+      const tokens = event.input_tokens != null || event.output_tokens != null ? count(asNumber(event.input_tokens) + asNumber(event.output_tokens)) : "—";
+      return `<li class="ai-event-row"><span class="ai-event-icon${event.status === "failed" ? " is-error" : ""}">${icon(isAction ? "check-circle" : "message")}</span><div class="ai-event-copy"><strong>${isAction ? "Ajuste de rotina" : "Conversa com o assistente"}</strong><span>${esc(event.action_type || event.model || "Modelo não informado")}${user ? ` · Conta ${esc(user.slice(0, 8))}` : ""}</span>${event.error_code ? `<small class="ai-event-error">Código: ${esc(event.error_code)}</small>` : ""}<small class="ai-event-request">ID ${esc(event.request_id || event.id || "—")}</small></div><div class="ai-event-meta"><strong>${esc(latency)}</strong><small>${tokens} tokens</small></div><div class="ai-event-status">${pill(status[0], status[1])}<small>${aiTime(event.created_at)}</small></div></li>`;
+    }).join("")}</ul>`;
+  }
+
+  function renderAiMonitoring() {
+    const metrics = state.ai.metrics;
+    return `<div class="ai-monitor-toolbar"><div><h3>Atividade do assistente</h3><p class="section-copy">Indicadores do período e os 50 eventos mais recentes.</p></div><label class="ai-period-label" for="ai-period">Período<select id="ai-period" class="toolbar-select"${state.loading.aiMetrics ? " disabled" : ""}>${[7, 30, 90].map((days) => `<option value="${days}"${state.ai.days === days ? " selected" : ""}>Últimos ${days} dias</option>`).join("")}</select></label></div>
+      ${state.errors.aiMetrics ? aiNotice(aiError(state.errors.aiMetrics), "error", "aiMetrics") : ""}
+      <div class="metric-grid ai-metric-grid">
+        ${metricCard("Chamadas", aiMetric("total_requests"), "Conversas iniciadas no período", "blue", "message")}
+        ${metricCard("Usuários ativos", aiMetric("active_users"), "Contas que usaram o assistente", "purple", "users")}
+        ${metricCard("Ações aplicadas", aiMetric("actions_applied"), "Ajustes confirmados pelo usuário", "green", "check-circle")}
+        ${metricCard("Falhas", aiMetric("failed_requests"), "Chamadas que não concluíram", "red", "alert")}
+      </div>
+      <div class="ai-monitor-grid"><section class="panel"><div class="panel-head"><div><h3>Conversas ao longo do tempo</h3><p class="section-copy">Chamadas por dia nos últimos ${state.ai.days} dias.</p></div><span class="ai-section-icon">${icon("bar-chart")}</span></div>${state.loading.aiMetrics && !metrics ? loadingState("Consultando os indicadores…") : renderAiDailyChart()}</section><section class="panel ai-operational-panel"><h3>Saúde da operação</h3><dl><div><dt>Chamadas concluídas</dt><dd>${aiMetric("successful_requests")}</dd></div><div><dt>Latência média</dt><dd>${aiMetric("avg_latency_ms", " ms")}</dd></div><div><dt>Tokens processados</dt><dd>${aiMetric("total_tokens")}</dd></div><div><dt>Ações propostas</dt><dd>${aiMetric("actions_proposed")}</dd></div><div><dt>Ações recusadas</dt><dd>${aiMetric("actions_rejected")}</dd></div><div><dt>Última chamada</dt><dd>${aiTime(metrics?.last_request_at)}</dd></div></dl><p class="ai-field-hint">Sem valores significa que os dados ainda não estão disponíveis. A chave e a função são verificadas pelo servidor durante cada chamada.</p></section></div>
+      <section class="panel ai-events-panel"><div class="panel-head"><div><h3>Registro de atividade</h3><p class="section-copy">Metadados de conversas e ações. Mensagens pessoais não são exibidas.</p></div><button type="button" class="button button--secondary button--compact" data-ai-retry="aiEvents"${state.loading.aiEvents ? " disabled" : ""}>${icon("refresh", state.loading.aiEvents ? "icon spin" : "icon")} Atualizar</button></div>${state.errors.aiEvents && state.ai.events ? aiNotice(aiError(state.errors.aiEvents), "error", "aiEvents") : ""}${renderAiEvents()}</section>`;
+  }
+
+  function renderAiAssistant() {
+    const config = state.ai.config;
+    return `<section class="ai-hero"><div class="ai-hero-mark">${icon("sparkles")}</div><div class="ai-hero-copy"><span class="eyebrow">Inteligência a serviço da rotina</span><h2>Gain Assistente</h2><p>Uma ajuda próxima de cada usuário. Você define a experiência e acompanha o que acontece.</p></div><div class="ai-hero-state">${config ? pill(config.enabled ? "Disponibilizado no app" : "Desativado no app", config.enabled ? "green" : "neutral") : pill(state.loading.aiConfig ? "Carregando configuração" : "Servidor pendente", "yellow")}<small>${config ? esc(config.model || "Modelo não definido") : "Conexão segura com o servidor"}</small>${config ? `<button type="button" class="button button--secondary button--compact" data-ai-key-settings>${icon("key")} Gerenciar chave</button>` : ""}</div></section>
+      <div class="ai-tabs" role="tablist" aria-label="Seções do assistente"><button id="ai-tab-config" type="button" role="tab" data-ai-tab="config" aria-controls="ai-tab-panel" aria-selected="${state.ai.tab === "config"}" tabindex="${state.ai.tab === "config" ? 0 : -1}">${icon("gauge")}Configuração</button><button id="ai-tab-monitor" type="button" role="tab" data-ai-tab="monitor" aria-controls="ai-tab-panel" aria-selected="${state.ai.tab === "monitor"}" tabindex="${state.ai.tab === "monitor" ? 0 : -1}">${icon("activity")}Monitoramento</button></div>
+      <div id="ai-tab-panel" role="tabpanel" aria-labelledby="ai-tab-${state.ai.tab}" tabindex="0">${state.ai.tab === "monitor" ? renderAiMonitoring() : renderAiConfig()}</div>`;
+  }
+
+  function onAiInput(target) {
+    const field = target.dataset.aiField;
+    if (!field || !state.ai.draft || state.ai.saving || !Object.hasOwn(state.ai.draft, field)) return;
+    state.ai.draft[field] = target.type === "checkbox" ? target.checked : target.value;
+    state.ai.dirty = JSON.stringify(state.ai.draft) !== JSON.stringify(aiDraft(state.ai.config));
+    state.ai.saveError = "";
+    if ($("ai-save-error")) $("ai-save-error").hidden = true;
+    if ($("ai-save-label")) $("ai-save-label").textContent = state.ai.dirty ? "Alterações ainda não salvas" : "Configuração sincronizada";
+    if ($("ai-save")) $("ai-save").disabled = !state.ai.dirty;
+    if ($("ai-reset")) $("ai-reset").disabled = !state.ai.dirty;
+    if (["welcome_message", "suggestions_text"].includes(field) && $("ai-preview-content")) $("ai-preview-content").innerHTML = renderAiPreview();
+  }
+
+  async function saveAiConfig() {
+    const ai = state.ai;
+    if (ai.saving || !ai.dirty || !ai.draft || !ai.config) return;
+    const draft = ai.draft;
+    const config = { enabled: draft.enabled, allow_mutations: draft.allow_mutations, model: draft.model.trim(), daily_message_limit: Number(draft.daily_message_limit), instructions: draft.instructions.trim(), welcome_message: draft.welcome_message.trim(), suggestions: draft.suggestions_text.split("\n").map((line) => line.trim()).filter(Boolean) };
+    let error = "";
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(config.model)) error = "Informe um identificador válido para o modelo de IA (até 80 caracteres).";
+    else if (!Number.isInteger(config.daily_message_limit) || config.daily_message_limit < 1 || config.daily_message_limit > 500) error = "O limite diário deve ser um número inteiro entre 1 e 500.";
+    else if (!config.welcome_message || config.welcome_message.length > 500) error = "A mensagem de boas-vindas deve ter entre 1 e 500 caracteres.";
+    else if (config.instructions.length > 8000) error = "As instruções devem ter até 8.000 caracteres.";
+    else if (!config.suggestions.length || config.suggestions.length > 6 || config.suggestions.some((item) => item.length > 120)) error = "Use de 1 a 6 sugestões, cada uma com até 120 caracteres.";
+    if (error) { ai.saveError = error; renderCurrentPage(); $("ai-save-error")?.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
+    ai.saving = true; ai.saveError = ""; renderCurrentPage();
+    try {
+      const result = aiResponse(await rpc("admin_update_ai_assistant_config", { p_config: config }));
+      if (!result.config || typeof result.config !== "object") throw new Error("O servidor não confirmou a configuração. Atualize os dados antes de tentar novamente.");
+      ai.config = result.config; ai.draft = aiDraft(result.config); ai.dirty = false; ai.savedAt = Date.now();
+      delete state.errors.aiConfig;
+      toast("Configuração do assistente salva", "success", "As próximas conversas já recebem os novos ajustes.");
+    } catch (error) {
+      ai.saveError = aiError(error?.message || String(error));
+      toast("Não foi possível salvar", "error", ai.saveError);
+    } finally { ai.saving = false; renderCurrentPage(); }
+  }
+
   /* Confirmações --------------------------------------------------------- */
   function askConfirm({ title, message, label = "Confirmar", danger = false, extra = "" }) {
     $("confirm-title").textContent = title;
@@ -2671,8 +2937,23 @@
   /* Renderização e eventos ---------------------------------------------- */
   function renderCurrentPage() {
     if (els.app.hidden) return;
-    const renderers = { overview: renderOverview, users: renderUsers, diagnostics: renderDiagnostics, traces: renderTraces, analytics: renderAnalytics, versions: renderVersions, news: renderNews, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
+    const active = document.activeElement;
+    const providerInput = state.page === "assistant" && state.ai.tab === "config" ? $("ai-provider-key") : null;
+    const providerFocused = providerInput && active === providerInput;
+    const aiFocus = state.page === "assistant" && active?.matches("[data-ai-field]") ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
+    const renderers = { overview: renderOverview, users: renderUsers, diagnostics: renderDiagnostics, traces: renderTraces, analytics: renderAnalytics, versions: renderVersions, news: renderNews, assistant: renderAiAssistant, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
     els.page.innerHTML = renderers[state.page]?.() || "";
+    if (providerInput && $("ai-provider-key")) {
+      providerInput.disabled = state.ai.providerSaving;
+      $("ai-provider-key").replaceWith(providerInput);
+      if (providerFocused && !state.ai.providerSaving) providerInput.focus({ preventScroll: true });
+      if ($("ai-provider-save")) $("ai-provider-save").disabled = state.ai.providerSaving || !providerInput.value.trim();
+    }
+    if (aiFocus && !state.ai.saving) {
+      const field = $(aiFocus.id);
+      field?.focus({ preventScroll: true });
+      if (field && aiFocus.start != null && ["text", "textarea"].includes(field.type)) field.setSelectionRange(aiFocus.start, aiFocus.end);
+    }
     if (state.page === "broadcast") {
       growComposer($("broadcast-message"));
       stickChatToBottom();
@@ -2686,7 +2967,7 @@
   }
 
   function retryResource(resource) {
-    const loaders = { devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, traces: loadTraces, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
+    const loaders = { devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, traces: loadTraces, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
     loaders[resource]?.();
   }
 
@@ -2701,6 +2982,10 @@
     if (!target) return;
     if (target.dataset.nav) return setPage(target.dataset.nav);
     if (target.dataset.retry) return retryResource(target.dataset.retry);
+    if (target.hasAttribute("data-ai-key-settings")) { state.ai.tab = "config"; renderCurrentPage(); $("ai-provider-key")?.focus(); return; }
+    if (target.dataset.aiTab && ["config", "monitor"].includes(target.dataset.aiTab)) { state.ai.tab = target.dataset.aiTab; renderCurrentPage(); $(`ai-tab-${state.ai.tab}`)?.focus({ preventScroll: true }); return; }
+    if (target.dataset.aiRetry) return retryResource(target.dataset.aiRetry);
+    if (target.hasAttribute("data-ai-reset") && !state.ai.saving) { state.ai.draft = aiDraft(state.ai.config); state.ai.dirty = false; state.ai.saveError = ""; return renderCurrentPage(); }
     if (target.dataset.userScope) { state.userFilter.scope = target.dataset.userScope; return renderCurrentPage(); }
     if (target.dataset.openUser) return openUser(target.dataset.openUser);
     if (target.dataset.openDiagnostic) return openDiagnostic(target.dataset.openDiagnostic);
@@ -2734,6 +3019,8 @@
   });
 
   els.page.addEventListener("input", (event) => {
+    if (event.target.id === "ai-provider-key") { if ($("ai-provider-save")) $("ai-provider-save").disabled = state.ai.providerSaving || !event.target.value.trim(); return; }
+    if (event.target.dataset.aiField) return onAiInput(event.target);
     if (event.target.id === "user-search") {
       state.userFilter.search = event.target.value;
       const results = $("users-results"); if (results) results.innerHTML = renderUserResults();
@@ -2777,6 +3064,11 @@
   }, true);
 
   els.page.addEventListener("keydown", (event) => {
+    if (event.target.matches("[data-ai-tab]") && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      state.ai.tab = event.key === "Home" ? "config" : event.key === "End" ? "monitor" : state.ai.tab === "config" ? "monitor" : "config";
+      renderCurrentPage(); $(`ai-tab-${state.ai.tab}`)?.focus({ preventScroll: true }); return;
+    }
     if (event.target.id !== "broadcast-message") return;
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
@@ -2785,6 +3077,8 @@
   });
 
   els.page.addEventListener("change", (event) => {
+    if (event.target.dataset.aiField) return onAiInput(event.target);
+    if (event.target.id === "ai-period") { state.ai.days = [7, 30, 90].includes(Number(event.target.value)) ? Number(event.target.value) : 30; state.ai.metrics = null; return loadAiMetrics(); }
     if (event.target.id === "broadcast-file") {
       const file = event.target.files?.[0];
       event.target.value = "";
@@ -2887,7 +3181,8 @@
   $("logout").addEventListener("click", () => logout(false));
   document.addEventListener("click", (event) => { if (!event.target.closest("#sidebar-account, #account-menu, #topbar-account")) $("account-menu").hidden = true; });
   window.addEventListener("hashchange", () => { if (state.session) setPage(pageFromHash(), { updateHistory: false }); });
-  window.addEventListener("beforeunload", (event) => { if (state.broadcast.sending) { event.preventDefault(); event.returnValue = ""; } });
+  window.addEventListener("beforeunload", (event) => { if (state.broadcast.sending || state.ai.dirty || state.ai.saving || state.ai.providerSaving) { event.preventDefault(); event.returnValue = ""; } });
+  els.page.addEventListener("submit", (event) => { if (event.target.id === "ai-config-form") { event.preventDefault(); saveAiConfig(); } else if (event.target.id === "ai-provider-form") { event.preventDefault(); saveAiProvider(); } });
 
   $("show-email-login").addEventListener("click", () => {
     const form = $("email-login-form"); form.hidden = !form.hidden;
