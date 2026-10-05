@@ -2657,6 +2657,7 @@
   }
 
   function loadAiConfig(options = {}) {
+    if (state.ai.saving) return Promise.resolve(null);
     return loadResource("aiConfig", () => rpc("admin_get_ai_assistant_config"), (result) => {
       const config = aiResponse(result).config;
       if (!config || typeof config !== "object") throw new Error("O servidor não retornou a configuração do assistente.");
@@ -2687,6 +2688,7 @@
   }
 
   function loadAiProvider(options = {}) {
+    if (state.ai.providerSaving) return Promise.resolve(null);
     return loadResource("aiProvider", () => rpc("admin_ai_assistant_provider_status"), (result) => {
       const provider = aiResponse(result);
       if (typeof provider.configured !== "boolean") throw new Error("O servidor não retornou o estado da chave do assistente.");
@@ -2714,12 +2716,14 @@
       input.value = ""; renderCurrentPage(); return;
     }
     input.value = "";
+    state.sequence.aiProvider = (state.sequence.aiProvider || 0) + 1; state.loading.aiProvider = false;
     ai.providerSaving = true; ai.providerError = ""; renderCurrentPage();
     try {
       const result = aiResponse(await rpc("admin_set_ai_assistant_provider_key", { p_key: key }));
       if (result.configured === true) ai.provider = { configured: true, key_last4: String(result.key_last4 || "").slice(-4), updated_at: result.updated_at };
       else await loadAiProvider({ quiet: true });
       delete state.errors.aiProvider;
+      delete state.errors.aiHealth;
       ai.health = null;
       toast("Chave do assistente salva", "success", "A chave foi protegida no servidor. Verifique a conexão para conferir a disponibilidade.");
     } catch {
@@ -2876,6 +2880,7 @@
     else if (config.instructions.length > 8000) error = "As instruções devem ter até 8.000 caracteres.";
     else if (!config.suggestions.length || config.suggestions.length > 6 || config.suggestions.some((item) => item.length > 120)) error = "Use de 1 a 6 sugestões, cada uma com até 120 caracteres.";
     if (error) { ai.saveError = error; renderCurrentPage(); $("ai-save-error")?.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
+    state.sequence.aiConfig = (state.sequence.aiConfig || 0) + 1; state.loading.aiConfig = false;
     ai.saving = true; ai.saveError = ""; renderCurrentPage();
     try {
       const result = aiResponse(await rpc("admin_update_ai_assistant_config", { p_config: config }));
