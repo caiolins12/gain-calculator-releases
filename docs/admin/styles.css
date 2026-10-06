@@ -1235,3 +1235,13 @@ dialog::backdrop { background: rgba(2,6,10,.72); backdrop-filter: blur(4px); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Gain IA › Planos e voz */
+.ai-two-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.ai-two-fields .ai-short-input { width: 100%; }
+.ai-two-fields select { width: 100%; }
+.ai-table td.is-ok { color: var(--green); font-weight: 700; }
+.ai-table td.is-warn { color: var(--yellow); font-weight: 700; }
+.ai-table td.is-error { color: var(--red); font-weight: 700; }
+.ai-table .table-sub { display: block; color: var(--muted); font-size: .75rem; font-weight: 400; margin-top: .125rem; }
+@media (max-width: 560px) { .ai-two-fields { grid-template-columns: 1fr; } }

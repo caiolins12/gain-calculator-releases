@@ -42,7 +42,7 @@
     traces: null,
     versions: null,
     news: null,
-    ai: { config: null, draft: null, dirty: false, saving: false, tab: "overview", days: 30, chart: "cost", eventFilter: "all", metrics: null, events: null, models: null, available: null, probes: {}, fx: null, fxLoading: false, health: null, provider: null, providerSaving: false, providerError: "", saveError: "", savedAt: null },
+    ai: { config: null, draft: null, dirty: false, saving: false, tab: "overview", days: 30, chart: "cost", eventFilter: "all", metrics: null, events: null, models: null, available: null, probes: {}, fx: null, fxLoading: false, health: null, provider: null, providerSaving: false, providerError: "", saveError: "", savedAt: null, plans: null, granting: false },
     now: Date.now(),
     serverNow: null,
     lastUpdated: null,
@@ -2646,6 +2646,7 @@
   const AI_TABS = [
     ["overview", "Visão geral", "gauge"],
     ["model", "Modelo e custos", "cpu"],
+    ["plans", "Planos e voz", "wallet"],
     ["experience", "Experiência", "message"],
     ["activity", "Atividade", "activity"],
     ["connection", "Conexão", "key"]
@@ -2667,7 +2668,9 @@
     server_error: "Erro no servidor",
     setup_required: "Chave não cadastrada",
     unsupported_model: "Modelo fora do catálogo",
-    budget_exceeded: "Orçamento do mês esgotado"
+    budget_exceeded: "Orçamento do mês esgotado",
+    empty_audio: "Áudio sem fala",
+    invalid_audio: "Áudio ilegível"
   };
   const AI_COST_STATUS = {
     estimated: ["Estimado", "green"], legacy_estimate: ["Estimativa antiga", "neutral"], incomplete: ["Parcial", "yellow"],
@@ -2779,8 +2782,23 @@
       instructions: String(config.instructions || ""), welcome_message: String(config.welcome_message || ""),
       suggestions_text: (Array.isArray(config.suggestions) ? config.suggestions : []).map(String).join("\n"),
       monthly_budget_usd: config.monthly_budget_usd == null ? "" : String(Number(config.monthly_budget_usd)).replace(".", ","),
-      budget_hard_limit: config.budget_hard_limit === true
+      budget_hard_limit: config.budget_hard_limit === true,
+      // Planos e voz (migração 20261006000000). Servidor antigo: campos vazios, não enviados.
+      essential_monthly_questions: String(config.essential_monthly_questions ?? ""),
+      pro_monthly_questions: String(config.pro_monthly_questions ?? ""),
+      essential_monthly_cost_cap_usd: config.essential_monthly_cost_cap_usd == null ? "" : String(Number(config.essential_monthly_cost_cap_usd)).replace(".", ","),
+      pro_monthly_cost_cap_usd: config.pro_monthly_cost_cap_usd == null ? "" : String(Number(config.pro_monthly_cost_cap_usd)).replace(".", ","),
+      voice_enabled: config.voice_enabled === true,
+      voice_max_seconds: String(config.voice_max_seconds ?? ""),
+      transcription_model: String(config.transcription_model || "gpt-transcribe"),
+      usd_brl_rate: config.usd_brl_rate == null ? "" : String(Number(config.usd_brl_rate)).replace(".", ",")
     };
+  }
+
+  /* Número digitado em pt-BR ("1,20", "1.200,50") para o servidor. */
+  function aiDecimal(text) {
+    const clean = String(text ?? "").trim().replace(/\s/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".");
+    return clean === "" ? null : Number(clean);
   }
 
   function aiFunction(body) {
@@ -2891,9 +2909,17 @@
     } catch { /* sem cotação */ } finally { state.ai.fxLoading = false; }
   }
 
+  function loadAiPlans(options = {}) {
+    return loadResource("aiPlans", () => rpc("admin_ai_assistant_plans"), (result) => {
+      const plans = aiResponse(result);
+      if (!Array.isArray(plans.products)) throw new Error("O servidor não retornou os planos da Gain IA.");
+      state.ai.plans = plans;
+    }, options);
+  }
+
   function loadAiAssistant(options = {}) {
     loadAiFx();
-    return Promise.allSettled([loadAiConfig(options), loadAiMetrics(options), loadAiEvents(options), loadAiProvider(options), loadAiModels(options)]);
+    return Promise.allSettled([loadAiConfig(options), loadAiMetrics(options), loadAiEvents(options), loadAiProvider(options), loadAiModels(options), loadAiPlans(options)]);
   }
 
   function setAiTab(tab, focus = false) {
@@ -2909,6 +2935,7 @@
   function activateAiTab() {
     const tab = state.ai.tab;
     if (["model", "connection"].includes(tab) && !state.ai.available && !state.loading.aiAvailable && !state.errors.aiAvailable) loadAiAvailability({ quiet: true });
+    if (tab === "plans" && !state.ai.plans && !state.loading.aiPlans && !state.errors.aiPlans) loadAiPlans({ quiet: true });
     if (tab === "connection" && !state.ai.health && !state.loading.aiHealth && !state.errors.aiHealth) loadAiHealth({ quiet: true });
   }
 
@@ -3120,6 +3147,115 @@
     </form>`;
   }
 
+  /* Planos e voz ------------------------------------------------------------ */
+  const PIX_FEE = 0.0099;
+
+  function brlCents(cents) {
+    return (asNumber(cents) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  }
+
+  function brlValue(value) {
+    if (value == null || !Number.isFinite(Number(value))) return "—";
+    const amount = Number(value);
+    return amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL", ...moneyDigits(Math.abs(amount)) });
+  }
+
+  /* Margem de cada produto em reais: preço menos a taxa do Pix menos o custo de
+     IA que ele pode gerar. "Típico" usa o custo médio real por pergunta dos
+     últimos 30 dias; "pior caso" usa o teto de custo do plano (Pro) ou o maior
+     custo de pergunta já visto (pacotes). */
+  function aiPlanEconomics(plans) {
+    const cfg = plans.config || {}, unit = plans.unit_cost || {};
+    const rate = asNumber(cfg.usd_brl_rate) || state.ai.fx?.rate || 6;
+    const avg = asNumber(unit.avg_cost_usd) || 0.0015, worst = Math.max(asNumber(unit.max_cost_usd), avg * 2);
+    const essentialQ = asNumber(cfg.essential_monthly_questions), proQ = asNumber(cfg.pro_monthly_questions);
+    const essentialCap = cfg.essential_monthly_cost_cap_usd == null ? essentialQ * worst : Math.min(asNumber(cfg.essential_monthly_cost_cap_usd), essentialQ * worst);
+    const proCap = cfg.pro_monthly_cost_cap_usd == null ? proQ * worst : Math.min(asNumber(cfg.pro_monthly_cost_cap_usd), proQ * worst);
+    const row = (label, cents, typicalUsd, worstUsd, note) => {
+      const net = cents / 100 * (1 - PIX_FEE);
+      return { label, cents, typical: typicalUsd * rate, worst: worstUsd * rate, marginTypical: net - typicalUsd * rate, marginWorst: net - worstUsd * rate, note };
+    };
+    const rows = [row("Licença Essencial (mensal)", 990, essentialQ * avg, essentialCap, `${count(essentialQ)} perguntas grátis embutidas`)];
+    for (const product of plans.products || []) {
+      if (!product.active) continue;
+      if (product.kind === "ai_credits") rows.push(row(product.title, product.amount_cents, product.ai_credits * avg, product.ai_credits * worst, `${count(product.ai_credits)} perguntas avulsas`));
+      else if (product.kind === "ai_pro") rows.push(row(product.title, product.amount_cents, Math.max(0, proQ - essentialQ) * avg, Math.max(0, proCap - essentialCap), `+${count(Math.max(0, proQ - essentialQ))} perguntas por mês`));
+      else if (product.license_days <= 31) rows.push(row(product.title, product.amount_cents, proQ * avg, proCap, "licença + Pro"));
+      else rows.push(row(product.title, product.amount_cents, proQ * avg * 12, proCap * 12, "licença + Pro (12 meses)"));
+    }
+    return { rate, avg, worst, rows };
+  }
+
+  function renderAiPlansConfig() {
+    const ai = state.ai, draft = ai.draft;
+    if (!draft || !ai.config) return "";
+    if (!Object.hasOwn(ai.config, "essential_monthly_questions")) return `<section class="panel ai-settings-panel">${aiNotice("Os planos da Gain IA dependem da migração 20261006000000 no servidor.", "info")}</section>`;
+    const disabled = ai.saving ? " disabled" : "";
+    const models = ai.plans?.transcription_models || [{ model: draft.transcription_model, label: draft.transcription_model }];
+    return `<section class="panel ai-settings-panel" aria-labelledby="ai-plans-title"><div class="panel-head"><div><span class="eyebrow">Cota grátis e uso justo</span><h3 id="ai-plans-title">Perguntas por mês</h3><p class="section-copy">Renovam todo dia 1º. Pacotes avulsos entram depois da cota.</p></div><span class="ai-section-icon">${icon("users")}</span></div>
+        <div class="ai-two-fields"><div><label class="field-label" for="ai-q-essential">Essencial (toda licença)</label><input id="ai-q-essential" class="ai-short-input" data-ai-field="essential_monthly_questions" type="number" min="0" max="10000" step="1" inputmode="numeric" value="${esc(draft.essential_monthly_questions)}"${disabled}></div>
+        <div><label class="field-label" for="ai-q-pro">Gain IA Pro</label><input id="ai-q-pro" class="ai-short-input" data-ai-field="pro_monthly_questions" type="number" min="0" max="100000" step="1" inputmode="numeric" value="${esc(draft.pro_monthly_questions)}"${disabled}></div></div>
+        <div class="ai-two-fields"><div><label class="field-label" for="ai-cap-essential">Teto de custo Essencial</label><div class="ai-money-input"><span>US$</span><input id="ai-cap-essential" data-ai-field="essential_monthly_cost_cap_usd" inputmode="decimal" placeholder="Sem teto" value="${esc(draft.essential_monthly_cost_cap_usd)}"${disabled}></div></div>
+        <div><label class="field-label" for="ai-cap-pro">Teto de custo Pro</label><div class="ai-money-input"><span>US$</span><input id="ai-cap-pro" data-ai-field="pro_monthly_cost_cap_usd" inputmode="decimal" placeholder="Sem teto" value="${esc(draft.pro_monthly_cost_cap_usd)}"${disabled}></div></div></div>
+        <p class="ai-field-hint">Teto por conta e por mês, só para as perguntas da cota. Com o modelo atual ele nunca chega antes da contagem; segura uso abusivo e troca para modelo caro.</p>
+      </section>
+      <section class="panel ai-settings-panel" aria-labelledby="ai-voice-title"><div class="panel-head"><div><span class="eyebrow">Mensagem de voz</span><h3 id="ai-voice-title">Áudio no assistente</h3><p class="section-copy">O app grava, a função transcreve e a pergunta segue como texto.</p></div><span class="ai-section-icon">${icon("message")}</span></div>
+        <label class="ai-toggle-row" for="ai-voice"><span><strong>Aceitar perguntas por voz</strong><small>Desligado, o microfone volta a ser o ditado do Android, sem custo.</small></span><span class="ai-switch"><input id="ai-voice" type="checkbox" role="switch" data-ai-field="voice_enabled"${draft.voice_enabled ? " checked" : ""}${disabled}><span aria-hidden="true"></span></span></label>
+        <div class="ai-two-fields"><div><label class="field-label" for="ai-voice-max">Duração máxima (segundos)</label><input id="ai-voice-max" class="ai-short-input" data-ai-field="voice_max_seconds" type="number" min="5" max="120" step="1" inputmode="numeric" value="${esc(draft.voice_max_seconds)}"${disabled}></div>
+        <div><label class="field-label" for="ai-transcription">Modelo de transcrição</label><select id="ai-transcription" data-ai-field="transcription_model"${disabled}>${models.map((m) => `<option value="${esc(m.model)}"${m.model === draft.transcription_model ? " selected" : ""}>${esc(m.label || m.model)}${m.usd_per_minute != null ? ` · ${esc(usd(m.usd_per_minute))}/min` : ""}${m.shutdown_on ? ` · sai em ${esc(aiDate(m.shutdown_on))}` : ""}</option>`).join("")}</select></div></div>
+        <label class="field-label" for="ai-fx">Câmbio de planejamento (R$ por US$)</label><input id="ai-fx" class="ai-short-input" data-ai-field="usd_brl_rate" inputmode="decimal" value="${esc(draft.usd_brl_rate)}"${disabled}><p class="ai-field-hint">Usado só nas margens abaixo. Inclua IOF e spread do cartão que paga a OpenAI.</p>
+      </section>`;
+  }
+
+  function renderAiPlansTab() {
+    const ai = state.ai, plans = ai.plans;
+    if (!ai.config) return state.loading.aiConfig ? loadingState("Carregando a configuração do assistente…") : aiNotice(aiError(state.errors.aiConfig || "A configuração do assistente está indisponível."), "error", "aiConfig");
+    if (!plans) return state.loading.aiPlans ? loadingState("Carregando os planos…") : aiNotice(aiError(state.errors.aiPlans || "Os planos da Gain IA ainda não estão no servidor."), "error", "aiPlans");
+    const eco = aiPlanEconomics(plans);
+    const tiers = plans.tiers || {}, essential = tiers.essential || {}, pro = tiers.pro || {};
+    const voice = plans.voice || {}, credits = plans.credits || {};
+    const revenue = (plans.sales || []).reduce((sum, item) => sum + asNumber(item.revenue_cents), 0);
+    const tone = (value) => value < 0 ? "is-error" : value < 1 ? "is-warn" : "is-ok";
+    return `<form id="ai-config-form" class="ai-form-stack" novalidate>
+      <div class="metric-grid ai-metric-grid">
+        ${metricCard("Perguntas no mês", count(asNumber(essential.questions) + asNumber(pro.questions)), `<strong>${count(essential.accounts)}</strong> Essencial · <strong>${count(pro.accounts)}</strong> Pro`, "blue", "message")}
+        ${metricCard("Contas Pro ativas", count(plans.pro?.active_accounts), `${count(credits.accounts_with_credits)} com perguntas avulsas`, "purple", "sparkles")}
+        ${metricCard("Receita da Gain IA no mês", brlCents(revenue), `${count((plans.sales || []).reduce((s, i) => s + asNumber(i.orders), 0))} compras por Pix`, "green", "wallet")}
+        ${metricCard("Voz no mês", count(voice.requests), voice.requests ? `${(asNumber(voice.seconds) / 60).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} min · ${esc(usd(voice.transcription_cost_usd))}` : "Nenhum áudio ainda", "yellow", "activity")}
+      </div>
+      <section class="panel"><div class="panel-head"><div><span class="eyebrow">Economia por produto</span><h3>Margem de cada venda</h3><p class="section-copy">Preço − Pix (0,99%) − custo de IA. Custo médio por pergunta: ${esc(usd(eco.avg))} (${esc(brlValue(eco.avg * eco.rate))}), ${count(plans.unit_cost?.sample)} perguntas em 30 dias; câmbio R$ ${eco.rate.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}.</p></div><span class="ai-section-icon">${icon("trending")}</span></div>
+        <table class="data-table ai-table"><thead><tr><th>Produto</th><th>Preço</th><th>Custo típico</th><th>Margem típica</th><th>Pior caso</th></tr></thead><tbody>${eco.rows.map((r) => `<tr><td><strong>${esc(r.label)}</strong><small class="table-sub">${esc(r.note)}</small></td><td>${esc(brlCents(r.cents))}</td><td>${esc(brlValue(r.typical))}</td><td class="${tone(r.marginTypical)}">${esc(brlValue(r.marginTypical))}</td><td class="${tone(r.marginWorst)}">${esc(brlValue(r.marginWorst))}</td></tr>`).join("")}</tbody></table>
+        <p class="ai-field-hint">Pior caso = a conta usa tudo no limite (teto de custo do plano ou a pergunta mais cara já registrada). Margem negativa em vermelho: reduza a cota, o teto ou troque o modelo.</p>
+      </section>
+      <div class="ai-model-extras">${renderAiPlansConfig()}
+        <section class="panel ai-settings-panel" aria-labelledby="ai-grant-title"><div class="panel-head"><div><span class="eyebrow">Suporte</span><h3 id="ai-grant-title">Dar perguntas ou dias de Pro</h3><p class="section-copy">Cortesia, reembolso de falha ou campanha. Créditos valem 12 meses.</p></div><span class="ai-section-icon">${icon("shield")}</span></div>
+          <label class="field-label" for="ai-grant-user">ID da conta (UUID)</label><input id="ai-grant-user" autocomplete="off" spellcheck="false" placeholder="00000000-0000-0000-0000-000000000000">
+          <div class="ai-two-fields"><div><label class="field-label" for="ai-grant-credits">Perguntas avulsas</label><input id="ai-grant-credits" class="ai-short-input" type="number" min="0" max="10000" value="0"></div><div><label class="field-label" for="ai-grant-days">Dias de Pro</label><input id="ai-grant-days" class="ai-short-input" type="number" min="0" max="366" value="0"></div></div>
+          <button type="button" class="button button--secondary ai-full-button" data-ai-grant${ai.granting ? " disabled" : ""}>${icon(ai.granting ? "loader" : "check", ai.granting ? "icon spin" : "icon")} Conceder</button>
+        </section>
+      </div>
+    </form>`;
+  }
+
+  async function grantAi() {
+    const ai = state.ai;
+    if (ai.granting) return;
+    const user = String($("ai-grant-user")?.value || "").trim();
+    const credits = Number($("ai-grant-credits")?.value || 0), days = Number($("ai-grant-days")?.value || 0);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user)) return toast("Informe o ID da conta", "error", "Copie o UUID na ficha do usuário.");
+    if (!Number.isInteger(credits) || !Number.isInteger(days) || credits < 0 || days < 0 || credits + days === 0) return toast("Nada para conceder", "error", "Informe perguntas ou dias de Pro.");
+    const ok = await askConfirm({ title: "Conceder Gain IA?", message: `${aiAccountLabel(user)} recebe ${credits ? `${count(credits)} perguntas avulsas` : ""}${credits && days ? " e " : ""}${days ? `${count(days)} dias de Pro` : ""}.`, label: "Conceder" });
+    if (!ok) return;
+    ai.granting = true; renderCurrentPage();
+    try {
+      const result = aiResponse(await rpc("admin_ai_grant", { p_user_id: user, p_credits: credits, p_pro_days: days }));
+      toast("Concedido", "success", `Saldo agora: ${count(result.usage?.plan_remaining)} do mês + ${count(result.usage?.credits)} avulsas.`);
+      loadAiPlans({ quiet: true });
+    } catch (error) {
+      toast("Não foi possível conceder", "error", aiError(error?.message || String(error)));
+    } finally { ai.granting = false; renderCurrentPage(); }
+  }
+
   /* Experiência no app ----------------------------------------------------- */
   function renderAiPreview() {
     const draft = state.ai.draft;
@@ -3289,13 +3425,13 @@
   function renderAiSaveBar() {
     const ai = state.ai;
     if (!ai.config || !ai.draft) return "";
-    if (!["model", "experience"].includes(ai.tab) && !ai.dirty) return "";
+    if (!["model", "experience", "plans"].includes(ai.tab) && !ai.dirty) return "";
     return `<div id="ai-save-error" class="ai-notice ai-notice--error ai-save-error" role="alert"${ai.saveError ? "" : " hidden"}>${icon("alert")}<div>${esc(ai.saveError)}</div></div>
       <div class="ai-save-bar${ai.dirty || ai.saving ? "" : " is-clean"}"><div><strong id="ai-save-label" aria-live="polite">${ai.saving ? "Salvando configuração…" : ai.dirty ? "Alterações ainda não salvas" : "Configuração sincronizada"}</strong><small>Última alteração: ${aiTime(ai.config.updated_at)}</small></div><div class="ai-save-actions"><button id="ai-reset" class="button button--secondary" type="button" data-ai-reset${ai.saving || !ai.dirty ? " disabled" : ""}>Desfazer</button><button id="ai-save" class="button button--primary" type="button" data-ai-save${ai.saving || !ai.dirty ? " disabled" : ""}>${icon(ai.saving ? "loader" : "check", ai.saving ? "icon spin" : "icon")}<span>${ai.saving ? "Salvando…" : "Salvar alterações"}</span></button></div></div>`;
   }
 
   function renderAiAssistant() {
-    const renderers = { overview: renderAiOverview, model: renderAiModelTab, experience: renderAiExperience, activity: renderAiActivity, connection: renderAiConnection };
+    const renderers = { overview: renderAiOverview, model: renderAiModelTab, plans: renderAiPlansTab, experience: renderAiExperience, activity: renderAiActivity, connection: renderAiConnection };
     return `${renderAiHero()}${renderAiAlerts()}${renderAiTabs()}
       <div id="ai-tab-panel" class="ai-tab-panel" role="tabpanel" aria-labelledby="ai-tab-${state.ai.tab}" tabindex="0">${(renderers[state.ai.tab] || renderAiOverview)()}</div>${renderAiSaveBar()}`;
   }
@@ -3332,6 +3468,13 @@
     const budget = budgetText === "" ? null : Number(budgetText);
     /* O servidor sem a migração de custos não conhece estes campos. */
     if (Object.hasOwn(ai.config, "budget_hard_limit")) Object.assign(config, { monthly_budget_usd: budget, budget_hard_limit: budget != null && draft.budget_hard_limit });
+    const hasPlans = Object.hasOwn(ai.config, "essential_monthly_questions");
+    if (hasPlans) Object.assign(config, {
+      essential_monthly_questions: Number(draft.essential_monthly_questions), pro_monthly_questions: Number(draft.pro_monthly_questions),
+      essential_monthly_cost_cap_usd: aiDecimal(draft.essential_monthly_cost_cap_usd), pro_monthly_cost_cap_usd: aiDecimal(draft.pro_monthly_cost_cap_usd),
+      voice_enabled: draft.voice_enabled, voice_max_seconds: Number(draft.voice_max_seconds), transcription_model: draft.transcription_model,
+      usd_brl_rate: aiDecimal(draft.usd_brl_rate)
+    });
     let error = "";
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(config.model)) error = "Escolha um modelo da lista.";
     else if (!Number.isInteger(config.daily_message_limit) || config.daily_message_limit < 1 || config.daily_message_limit > 500) error = "O limite diário deve ser um número inteiro entre 1 e 500.";
@@ -3339,6 +3482,10 @@
     else if (config.instructions.length > 8000) error = "As instruções devem ter até 8.000 caracteres.";
     else if (!config.suggestions.length || config.suggestions.length > 6 || config.suggestions.some((item) => item.length > 120)) error = "Use de 1 a 6 sugestões, cada uma com até 120 caracteres.";
     else if (budget != null && (!Number.isFinite(budget) || budget < 0.01 || budget > 100000)) error = "O orçamento deve ficar entre US$ 0,01 e US$ 100.000, ou em branco para não limitar.";
+    else if (hasPlans && (!Number.isInteger(config.essential_monthly_questions) || config.essential_monthly_questions < 0 || !Number.isInteger(config.pro_monthly_questions) || config.pro_monthly_questions < config.essential_monthly_questions)) error = "As perguntas do Pro precisam ser um número inteiro maior ou igual às do Essencial.";
+    else if (hasPlans && [config.essential_monthly_cost_cap_usd, config.pro_monthly_cost_cap_usd].some((v) => v != null && (!Number.isFinite(v) || v < 0 || v > 1000))) error = "Os tetos de custo devem ficar entre US$ 0 e US$ 1.000, ou em branco.";
+    else if (hasPlans && (!Number.isInteger(config.voice_max_seconds) || config.voice_max_seconds < 5 || config.voice_max_seconds > 120)) error = "A duração do áudio deve ficar entre 5 e 120 segundos.";
+    else if (hasPlans && (!Number.isFinite(config.usd_brl_rate) || config.usd_brl_rate < 1 || config.usd_brl_rate > 50)) error = "Informe o câmbio entre 1 e 50.";
     if (error) { ai.saveError = error; renderCurrentPage(); $("ai-save-error")?.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
     if (config.model !== ai.config.model) {
       const next = aiModelInfo(config.model);
@@ -3353,7 +3500,7 @@
       ai.config = result.config; ai.draft = aiDraft(result.config); ai.dirty = false; ai.savedAt = Date.now();
       delete state.errors.aiConfig;
       toast("Configuração do assistente salva", "success", "As próximas conversas já usam os novos ajustes.");
-      loadAiModels({ quiet: true }); loadAiMetrics({ quiet: true });
+      loadAiModels({ quiet: true }); loadAiMetrics({ quiet: true }); if (hasPlans) loadAiPlans({ quiet: true });
     } catch (error) {
       ai.saveError = aiError(error?.message || String(error));
       toast("Não foi possível salvar", "error", ai.saveError);
@@ -3438,7 +3585,7 @@
   }
 
   function retryResource(resource) {
-    const loaders = { devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, traces: loadTraces, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
+    const loaders = { devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
     loaders[resource]?.();
   }
 
@@ -3461,6 +3608,7 @@
     if (target.dataset.aiEvents) { state.ai.eventFilter = ["chat", "action", "failed"].includes(target.dataset.aiEvents) ? target.dataset.aiEvents : "all"; return renderCurrentPage(); }
     if (target.hasAttribute("data-ai-check-all")) { loadAiHealth(); loadAiAvailability(); return; }
     if (target.hasAttribute("data-ai-save")) return saveAiConfig();
+    if (target.hasAttribute("data-ai-grant")) return grantAi();
     if (target.hasAttribute("data-ai-reset") && !state.ai.saving) { state.ai.draft = aiDraft(state.ai.config); state.ai.dirty = false; state.ai.saveError = ""; return renderCurrentPage(); }
     if (target.dataset.userScope) { state.userFilter.scope = target.dataset.userScope; return renderCurrentPage(); }
     if (target.dataset.openUser) return openUser(target.dataset.openUser);
