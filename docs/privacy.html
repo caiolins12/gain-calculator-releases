@@ -17,7 +17,7 @@
             <p class="eyebrow">Gain Calculator</p>
             <h1>Política de Privacidade</h1>
             <p class="subtitle">Como tratamos seus dados no Gain Calculator</p>
-            <p class="meta">Versão 10 &middot; Vigente desde 31 de agosto de 2026</p>
+            <p class="meta">Versão 12 &middot; Vigente desde 7 de outubro de 2026</p>
         </header>
 
         <section class="legal-section">
@@ -87,7 +87,7 @@ A leitura é restrita aos aplicativos que você marcou, mais os aplicativos de N
 
 Fora disso, o app não lê a tela de aplicativos não selecionados, e mantém bloqueio permanente sobre categorias sensíveis — aplicativos de banco, mensageria e visualizadores de imagem não são lidos em nenhuma hipótese, mesmo que apareçam na tela.
 
-O app apenas LÊ. Ele não toca em botões, não aceita nem recusa corridas e não executa nenhuma ação dentro de outros aplicativos em seu nome. Você pode desligar o serviço de acessibilidade a qualquer momento, nos Ajustes do Android, e o monitoramento cessa imediatamente.
+O monitoramento apenas LÊ. Ele não toca em botões, não aceita nem recusa corridas e não executa nenhuma ação dentro de outros aplicativos em seu nome. O mesmo serviço de acessibilidade é usado pelo Gain Copiloto, e SOMENTE quando você pede por voz, para quatro gestos de sistema: voltar, abrir os aplicativos recentes, abrir as notificações e tirar um print (seção 28). Você pode desligar o serviço de acessibilidade a qualquer momento, nos Ajustes do Android, e o monitoramento cessa imediatamente.
 
 Se você ativar o recurso opcional de Captura de Tela automática, o app salva na galeria do seu aparelho (pasta pública "Pictures/GainCalculator") uma imagem de cada solicitação detectada. Essas imagens ficam somente no seu dispositivo, sob seu controle, e não são enviadas a nós nem a terceiros. Como elas contêm o nome do passageiro e os endereços da corrida, valem para elas os mesmos cuidados da seção 3.</p>
         </section>
@@ -184,11 +184,11 @@ As notificações de funcionamento não podem ser desligadas sem desligar o recu
             <h2>11. O que NÃO coletamos</h2>
             <p>• Não guardamos coordenadas nem trilhas de percurso. O app passou a oferecer uma medição OPCIONAL da distância rodada (seção 26): concedida a permissão, a localização é lida durante o monitoramento e convertida em metros na hora; a latitude e a longitude ficam apenas na memória, entre duas leituras, e não são gravadas em lugar nenhum nem enviadas a nós. Sem a permissão de localização nenhuma leitura de localização acontece, e o odômetro volta a ser estimado.
 • Não coletamos o seu endereço residencial, comercial ou de cobrança. Os únicos endereços armazenados pelo app são os pontos de embarque e desembarque exibidos nas solicitações de corrida.
-• Não acessamos sua agenda de contatos, mensagens (SMS/WhatsApp), histórico de chamadas ou e-mails.
+• Não acessamos suas mensagens (SMS/WhatsApp), seu histórico de chamadas nem seus e-mails. A agenda de contatos só é consultada se você pedir ao Gain Copiloto para ligar ou mandar mensagem para alguém e tiver concedido a permissão: a busca acontece no aparelho, na hora do pedido, e a agenda não é enviada a nós nem a terceiros (seção 28).
 • Não navegamos pela sua galeria de fotos. O app ESCREVE nela os arquivos que você pediu — as gravações de vídeo e, se ativado, os prints das solicitações — e só consegue LER a imagem única que você escolher no seletor do Android para a leitura por print (seção 5).
 • Não pedimos a permissão de projeção de mídia (compartilhamento ou gravação da tela). A imagem da tela usada pelo reconhecimento vem do próprio serviço de acessibilidade.
 • Não lemos a tela de aplicativos que você não selecionou, e nunca a de aplicativos de banco, mensageria ou visualizadores de imagem.
-• Não controlamos, automatizamos ou clicamos em botões de outros aplicativos. O Gain Calculator apenas lê o que aparece na tela quando o monitoramento está ativo — nunca aceita ou recusa corridas em seu nome.
+• Não clicamos em botões de outros aplicativos. O monitoramento apenas lê o que aparece na tela — nunca aceita ou recusa corridas em seu nome. As únicas ações fora do app são os comandos que você pede por voz ao Gain Copiloto (seção 28).
 • Não utilizamos plataformas de publicidade, analytics de terceiros nem ferramentas de attribution. O app não exibe anúncios.
 • Não vendemos, alugamos nem cedemos dados pessoais a quem quer que seja.</p>
         </section>
@@ -219,13 +219,15 @@ Para os dados de passageiros e terceiros (seção 3), atuamos como operador e o 
 • Google LLC (Google ML Kit): biblioteca de reconhecimento de texto. O processamento ocorre localmente no dispositivo; não há envio das imagens da sua tela para a Google.
 • Google LLC (Play Integrity API): para verificar que o app é a versão legítima distribuída pela Play Store e que o aparelho não foi adulterado, o app solicita ao Google um atestado de integridade. A Google recebe sinais técnicos do dispositivo e do aplicativo; nós recebemos apenas o resultado da verificação. Esse mecanismo protege sua licença contra fraude e não coleta dados pessoais seus.
 • Google LLC (Google Play): distribuição do aplicativo e de suas atualizações.
+• OpenAI (OpenAI, L.L.C., EUA): processa as conversas com a Gain IA e com o Gain Copiloto, e somente quando você usa um dos dois. Recebe os dados do Gain enviados como contexto da pergunta, as mensagens, imagens e áudios que você manda e o texto das respostas faladas, para gerar a voz. Detalhes nas seções 27 e 28.
+• Reconhecedor de voz do Android (do Google ou do fabricante do aparelho): transcreve a sua fala quando você usa o Gain Copiloto. Quando o aparelho reconhece a fala no próprio dispositivo, a voz não sai do celular; nos demais, o reconhecedor padrão pode processá-la online, sob a política de privacidade de quem o fornece. Detalhes na seção 28.
 
 Não vendemos seus dados pessoais a terceiros. Não compartilhamos seus dados para publicidade direcionada. Nenhum dado é compartilhado com as plataformas de transporte (Uber, 99, inDrive e outras), com as quais não temos qualquer vínculo.</p>
         </section>
 
         <section class="legal-section">
             <h2>15. Transferência internacional de dados</h2>
-            <p>Parte da nossa infraestrutura e dos nossos operadores está sediada fora do Brasil. Em particular, os dados sincronizados na sua conta são armazenados em servidores do Supabase, e os serviços da Google (autenticação, integridade e distribuição do app) são prestados por empresa estrangeira.
+            <p>Parte da nossa infraestrutura e dos nossos operadores está sediada fora do Brasil. Em particular, os dados sincronizados na sua conta são armazenados em servidores do Supabase, os serviços da Google (autenticação, integridade e distribuição do app) são prestados por empresa estrangeira e as conversas com a Gain IA e com o Gain Copiloto são processadas pela OpenAI, nos Estados Unidos.
 
 Essas transferências são realizadas nos termos do art. 33 da LGPD, quando necessárias para a execução do contrato celebrado com você e mediante cláusulas contratuais que obrigam o operador a garantir nível de proteção compatível com o da legislação brasileira. Você pode solicitar informações adicionais sobre essas transferências pelo e-mail <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a>.</p>
         </section>
@@ -341,6 +343,40 @@ PARA QUE SERVE. Exclusivamente para o odômetro e os alertas de troca do Control
 BASE LEGAL E CONTROLE. Consentimento (art. 7º, I, da LGPD), colhido na tela de divulgação que o app exibe ANTES do pedido de permissão ao Android, explicando o que é lido e o que é guardado. Você pode revogar a qualquer momento nos Ajustes do Android — a leitura cessa imediatamente e o odômetro volta a ser estimado pelas corridas. Os números já medidos podem ser apagados em Ajustes — Limpar dados — Rodagem medida por GPS.
 
 CONSUMO DE BATERIA. A medição mantém o receptor de localização em uso durante o turno e consome bateria. É uma das razões de a permissão ser apresentada como opcional, e de a decisão ser sua.</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>27. Gain IA (assistente do app)</h2>
+            <p>A Gain IA é um assistente opcional que responde perguntas sobre os seus ganhos, metas e o uso do app, e prepara ajustes que você confirma. Nada nela acontece sem que você abra o assistente e aceite, na primeira vez, a janela "Você está no controle".
+
+O que vai para o processamento, a cada pergunta: os dados do Gain necessários para responder com contexto (configurações, resumos de ganhos e despesas, lançamentos, corridas e solicitações recentes, endereços recentes e o estado do monitoramento) e a mensagem, a imagem ou o áudio que você enviar. Chaves Pix, senhas e tokens de acesso não fazem parte do contexto. O processamento é feito pela OpenAI, nos Estados Unidos (seções 14 e 15). Pelos termos da API da OpenAI, esse conteúdo não é usado para treinar modelos por padrão e pode ser retido por até 30 dias para prevenção de abuso.
+
+Áudio: a mensagem de voz é gravada no seu aparelho, enviada para ser transcrita em texto e apagada do aparelho depois do envio. Nós não guardamos o áudio nem a transcrição; a transcrição segue apenas na conversa aberta no app.
+
+O que nós guardamos: metadados técnicos de cada pergunta (data, sucesso ou falha, tempo de resposta, volume de processamento e custo estimado, duração do áudio e quais ajustes foram propostos e confirmados), por 90 dias; e a contagem de perguntas do mês da sua conta e o saldo de pacotes comprados, por até 13 meses, para controlar a cota e as compras. O conteúdo das mensagens não fica no nosso servidor nem aparece no painel administrativo.
+
+Base legal: execução do contrato, quando você usa o recurso (art. 7º, V, da LGPD). Você pode deixar de usar o assistente a qualquer momento e revogar o aceite em "Privacidade e dados", no menu da conversa. As respostas são geradas automaticamente e podem conter erros: confira valores antes de confirmar qualquer ajuste.
+
+O Gain Copiloto, o modo por voz da Gain IA, segue as regras desta seção, com o que a seção 28 acrescenta.</p>
+        </section>
+
+        <section class="legal-section">
+            <h2>28. Gain Copiloto (comandos de voz)</h2>
+            <p>O Gain Copiloto é o modo por voz da Gain IA, pensado para quem está dirigindo: você fala, ele responde em voz e pode executar no celular comandos simples que você pedir. É opcional e só começa a ouvir quando você toca no botão do Copiloto, nos controles flutuantes.
+
+COMO ELE OUVE. A fala é transcrita pelo reconhecedor de voz do próprio Android. Quando o aparelho oferece reconhecimento no dispositivo, a voz não sai do celular; nos demais, o reconhecedor padrão do aparelho (em geral o do Google ou do fabricante) pode processá-la online, sob a política de quem o fornece. Sem reconhecedor em português, o áudio é gravado e transcrito como na seção 27. Depois de responder, o Copiloto volta a ouvir sozinho no máximo cinco vezes seguidas sem um toque seu, e encerra quando você diz que terminou. Enquanto ele ouve, o cartão do Copiloto fica na tela mostrando a sua voz.
+
+O QUE VAI PARA A OPENAI. O texto do que você falou e os dados do Gain usados como contexto, como na seção 27, e o texto da resposta, para ser convertido em voz. Quando você pede algo no celular, a IA recebe apenas a sua frase — por exemplo, o nome do contato, do aplicativo ou do lugar que você disse — e devolve qual comando executar.
+
+O QUE ELE PODE FAZER NO CELULAR, sempre a seu pedido: abrir um aplicativo; voltar ao aplicativo anterior ou à tela inicial; voltar uma tela, abrir os aplicativos recentes, abrir as notificações e tirar um print (estes quatro pelo serviço de acessibilidade); abrir a navegação até um endereço ou buscar um lugar próximo no aplicativo de mapas; fazer uma ligação; deixar uma mensagem pronta no WhatsApp ou no SMS; tocar, pausar e trocar a música; ajustar o volume; ligar e desligar a lanterna; criar um timer ou um alarme no aplicativo de relógio; abrir telas de ajustes do Android; e fazer uma pesquisa na web.
+
+O QUE ELE NÃO FAZ. Não envia mensagens: o texto fica pronto e quem toca em enviar é você. Não toca em botões dentro de outros aplicativos, não aceita nem recusa corridas e não age sem um pedido seu. Os gestos de sistema (voltar, recentes, notificações, print) são os mesmos dos botões de navegação do Android e valem para o que estiver na tela no momento do pedido. A lista de aplicativos instalados é consultada no aparelho para achar o que você pediu e não é enviada a ninguém.
+
+CONTATOS E LIGAÇÕES. Para ligar ou mandar mensagem para alguém pelo nome, o Copiloto pede, no primeiro uso, a permissão de contatos e, para ligar direto, a de fazer chamadas. A agenda é consultada SOMENTE no aparelho, no momento do pedido, para achar o número do nome que você falou: ela não é enviada a nós nem à OpenAI e não é guardada pelo app. Sem a permissão de contatos, não há busca na agenda; sem a de chamadas, o Copiloto abre o discador com o número para você tocar em ligar. As duas podem ser revogadas a qualquer momento nos Ajustes do Android.
+
+PRINTS. O print pedido por voz é feito pelo próprio Android e salvo na sua galeria, como um print comum: o app não lê nem envia essa imagem.
+
+Base legal: execução do contrato, quando você usa o recurso (art. 7º, V, da LGPD). Use o Copiloto sem tirar a atenção do trânsito (seção 7 dos Termos de Uso).</p>
         </section>
 
         <footer class="page-footer">
