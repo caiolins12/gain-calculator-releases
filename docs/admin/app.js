@@ -199,24 +199,54 @@
   }
 
   /* Autenticação e transporte ------------------------------------------- */
+  /* A sessão fica no localStorage para o painel abrir já logado depois de
+     fechar a aba ou o navegador, enquanto o refresh token valer. O Supabase
+     troca o refresh token a cada renovação, então as abas abertas compartilham
+     o mesmo registro e renovam uma de cada vez (ver refreshSession). */
   function storeSession(session) {
     state.session = session;
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); }
+    catch { /* armazenamento bloqueado: a sessão vale só nesta aba */ }
+  }
+
+  function storedSession() {
+    try {
+      const session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+      return session?.accessToken ? session : null;
+    } catch {
+      return null;
+    }
   }
 
   function readSession() {
+    const stored = storedSession();
+    if (stored) return stored;
+    /* Sessão aberta antes da persistência: passa para o localStorage ao entrar. */
     try {
-      const session = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
-      return session?.accessToken ? session : null;
-    } catch {
+      const legacy = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
       sessionStorage.removeItem(SESSION_KEY);
+      return legacy?.accessToken ? legacy : null;
+    } catch {
       return null;
     }
   }
 
   function clearSession() {
     state.session = null;
-    sessionStorage.removeItem(SESSION_KEY);
+    try { localStorage.removeItem(SESSION_KEY); sessionStorage.removeItem(SESSION_KEY); }
+    catch { /* nada guardado */ }
+  }
+
+  function sessionExpiredError() {
+    const error = new Error("Sua sessão expirou. Entre novamente.");
+    error.status = 401;
+    return error;
+  }
+
+  /* Trava entre abas: sem ela, duas abas renovariam com o mesmo refresh token
+     e a segunda seria recusada (ou derrubaria a sessão inteira por reuso). */
+  function withRefreshLock(task) {
+    return navigator.locks?.request ? navigator.locks.request("gain_admin_refresh", task) : task();
   }
 
   function sessionFromHash() {
@@ -237,16 +267,29 @@
   }
 
   async function refreshSession() {
-    if (!state.session?.refreshToken) throw new Error("Sua sessão expirou. Entre novamente.");
+    if (!state.session?.refreshToken) throw sessionExpiredError();
     if (refreshPromise) return refreshPromise;
-    refreshPromise = (async () => {
+    const usedToken = state.session.refreshToken;
+    refreshPromise = withRefreshLock(async () => {
+      /* Outra aba pode ter renovado enquanto esta esperava a vez. */
+      const stored = storedSession();
+      if (stored?.refreshToken && stored.refreshToken !== usedToken) {
+        state.session = { ...stored, email: stored.email || state.session?.email || "" };
+        if (!stored.expiresAt || stored.expiresAt - Date.now() > 30_000) return state.session.accessToken;
+      }
+      if (!state.session?.refreshToken) throw sessionExpiredError();
       const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
         method: "POST",
         headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: state.session.refreshToken })
       });
       const json = await response.json().catch(() => ({}));
-      if (!response.ok || !json.access_token) throw new Error("Sua sessão expirou. Entre novamente.");
+      if (!response.ok || !json.access_token) {
+        /* 4xx = refresh token revogado ou vencido; o resto é falha passageira
+           e não pode jogar fora uma sessão que ainda vale. */
+        if (response.status >= 400 && response.status < 500) throw sessionExpiredError();
+        throw new Error(`Não foi possível renovar a sessão (${response.status}). Tente novamente.`);
+      }
       storeSession({
         ...state.session,
         accessToken: json.access_token,
@@ -255,7 +298,7 @@
         email: json.user?.email || state.session.email
       });
       return state.session.accessToken;
-    })().finally(() => { refreshPromise = null; });
+    }).finally(() => { refreshPromise = null; });
     return refreshPromise;
   }
 
@@ -338,6 +381,15 @@
 
   function logout(expired = false) {
     stopPageTimers();
+    /* Sair de propósito revoga o refresh token no Supabase: a sessão guardada
+       no navegador deixa de valer mesmo que alguém tenha copiado. */
+    if (!expired && state.session?.accessToken) {
+      fetch(`${SUPABASE_URL}/auth/v1/logout?scope=local`, {
+        method: "POST",
+        keepalive: true,
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${state.session.accessToken}` }
+      }).catch(() => {});
+    }
     clearSession();
     els.app.hidden = true;
     els.auth.hidden = false;
@@ -1286,7 +1338,7 @@
   /* Uso e adoção --------------------------------------------------------- */
   const EVENT_LABELS = {
     accept_shown: "Janela de aceite exibida", accept_tapped: "Aceitar tocado", accept_dismissed: "Janela dispensada", accept_expired: "Janela expirada",
-    home_entry_tapped: "Atalho de entrada", home_expense_tapped: "Atalho de saída", home_statement_tapped: "Atalho de extrato", home_addresses_tapped: "Atalho de endereços", home_pix_tapped: "Atalho de Pix",
+    home_entry_tapped: "Atalho de entrada", home_expense_tapped: "Atalho de saída", home_statement_tapped: "Atalho de extrato", home_addresses_tapped: "Atalho de endereços", home_pix_tapped: "Atalho de Pix", home_share_tapped: "Atalho de compartilhar",
     ride_accepted: "Corrida aceita", ride_finished: "Corrida finalizada", ride_rejected: "Corrida recusada", ride_canceled: "Corrida cancelada", ride_missed: "Corrida perdida"
   };
 
@@ -3179,7 +3231,7 @@
     for (const product of plans.products || []) {
       if (!product.active) continue;
       if (product.kind === "ai_credits") rows.push(row(product.title, product.amount_cents, product.ai_credits * avg, product.ai_credits * worst, `${count(product.ai_credits)} perguntas avulsas`));
-      else if (product.kind === "ai_pro") rows.push(row(product.title, product.amount_cents, Math.max(0, proQ - essentialQ) * avg, Math.max(0, proCap - essentialCap), `+${count(Math.max(0, proQ - essentialQ))} perguntas por mês`));
+      else if (product.kind === "ai_pro") rows.push(row(product.title, product.amount_cents, Math.max(0, proQ - essentialQ) * avg, Math.max(0, proCap - essentialCap), `+${count(Math.max(0, proQ - essentialQ))} perguntas a cada 30 dias`));
       else if (product.license_days <= 31) rows.push(row(product.title, product.amount_cents, proQ * avg, proCap, "licença + Pro"));
       else rows.push(row(product.title, product.amount_cents, proQ * avg * 12, proCap * 12, "licença + Pro (12 meses)"));
     }
@@ -3192,12 +3244,12 @@
     if (!Object.hasOwn(ai.config, "essential_monthly_questions")) return `<section class="panel ai-settings-panel">${aiNotice("Os planos da Gain IA dependem da migração 20261006000000 no servidor.", "info")}</section>`;
     const disabled = ai.saving ? " disabled" : "";
     const models = ai.plans?.transcription_models || [{ model: draft.transcription_model, label: draft.transcription_model }];
-    return `<section class="panel ai-settings-panel" aria-labelledby="ai-plans-title"><div class="panel-head"><div><span class="eyebrow">Cota grátis e uso justo</span><h3 id="ai-plans-title">Perguntas por mês</h3><p class="section-copy">Renovam todo dia 1º. Pacotes avulsos entram depois da cota.</p></div><span class="ai-section-icon">${icon("users")}</span></div>
+    return `<section class="panel ai-settings-panel" aria-labelledby="ai-plans-title"><div class="panel-head"><div><span class="eyebrow">Cota grátis e uso justo</span><h3 id="ai-plans-title">Perguntas por mês</h3><p class="section-copy">Essencial renova todo dia 1º; o extra do Pro, a cada 30 dias contados da compra (o número do Pro já inclui o Essencial). Pacotes avulsos entram depois das duas.</p></div><span class="ai-section-icon">${icon("users")}</span></div>
         <div class="ai-two-fields"><div><label class="field-label" for="ai-q-essential">Essencial (toda licença)</label><input id="ai-q-essential" class="ai-short-input" data-ai-field="essential_monthly_questions" type="number" min="0" max="10000" step="1" inputmode="numeric" value="${esc(draft.essential_monthly_questions)}"${disabled}></div>
         <div><label class="field-label" for="ai-q-pro">Gain IA Pro</label><input id="ai-q-pro" class="ai-short-input" data-ai-field="pro_monthly_questions" type="number" min="0" max="100000" step="1" inputmode="numeric" value="${esc(draft.pro_monthly_questions)}"${disabled}></div></div>
         <div class="ai-two-fields"><div><label class="field-label" for="ai-cap-essential">Teto de custo Essencial</label><div class="ai-money-input"><span>US$</span><input id="ai-cap-essential" data-ai-field="essential_monthly_cost_cap_usd" inputmode="decimal" placeholder="Sem teto" value="${esc(draft.essential_monthly_cost_cap_usd)}"${disabled}></div></div>
         <div><label class="field-label" for="ai-cap-pro">Teto de custo Pro</label><div class="ai-money-input"><span>US$</span><input id="ai-cap-pro" data-ai-field="pro_monthly_cost_cap_usd" inputmode="decimal" placeholder="Sem teto" value="${esc(draft.pro_monthly_cost_cap_usd)}"${disabled}></div></div></div>
-        <p class="ai-field-hint">Teto por conta e por mês, só para as perguntas da cota. Com o modelo atual ele nunca chega antes da contagem; segura uso abusivo e troca para modelo caro.</p>
+        <p class="ai-field-hint">Teto por conta, só para as perguntas da cota: o do Essencial vale por mês; o do Pro, por período de 30 dias, já incluindo o do Essencial. Com o modelo atual ele nunca chega antes da contagem; segura uso abusivo e troca para modelo caro.</p>
       </section>
       <section class="panel ai-settings-panel" aria-labelledby="ai-voice-title"><div class="panel-head"><div><span class="eyebrow">Mensagem de voz</span><h3 id="ai-voice-title">Áudio no assistente</h3><p class="section-copy">O app grava, a função transcreve e a pergunta segue como texto.</p></div><span class="ai-section-icon">${icon("message")}</span></div>
         <label class="ai-toggle-row" for="ai-voice"><span><strong>Aceitar perguntas por voz</strong><small>Desligado, o microfone volta a ser o ditado do Android, sem custo.</small></span><span class="ai-switch"><input id="ai-voice" type="checkbox" role="switch" data-ai-field="voice_enabled"${draft.voice_enabled ? " checked" : ""}${disabled}><span aria-hidden="true"></span></span></label>
@@ -3249,7 +3301,7 @@
     ai.granting = true; renderCurrentPage();
     try {
       const result = aiResponse(await rpc("admin_ai_grant", { p_user_id: user, p_credits: credits, p_pro_days: days }));
-      toast("Concedido", "success", `Saldo agora: ${count(result.usage?.plan_remaining)} do mês + ${count(result.usage?.credits)} avulsas.`);
+      toast("Concedido", "success", `Saldo agora: ${count(result.usage?.plan_remaining)} do plano + ${count(result.usage?.credits)} avulsas.`);
       loadAiPlans({ quiet: true });
     } catch (error) {
       toast("Não foi possível conceder", "error", aiError(error?.message || String(error)));
@@ -3805,6 +3857,14 @@
   $("logout").addEventListener("click", () => logout(false));
   document.addEventListener("click", (event) => { if (!event.target.closest("#sidebar-account, #account-menu, #topbar-account")) $("account-menu").hidden = true; });
   window.addEventListener("hashchange", () => { if (state.session) setPage(pageFromHash(), { updateHistory: false }); });
+  /* Outra aba renovou o token (adota o novo) ou saiu (sai junto). */
+  window.addEventListener("storage", (event) => {
+    if (event.key !== SESSION_KEY && event.key !== null) return;
+    if (!state.session) return;
+    const stored = storedSession();
+    if (stored) state.session = { ...stored, email: stored.email || state.session.email };
+    else { state.session = null; logout(false); }
+  });
   window.addEventListener("beforeunload", (event) => { if (state.broadcast.sending || state.ai.dirty || state.ai.saving || state.ai.providerSaving) { event.preventDefault(); event.returnValue = ""; } });
   els.page.addEventListener("submit", (event) => { if (event.target.id === "ai-config-form") { event.preventDefault(); saveAiConfig(); } else if (event.target.id === "ai-provider-form") { event.preventDefault(); saveAiProvider(); } });
 
@@ -3836,7 +3896,12 @@
     const googleButton = $("google-login");
     googleButton.disabled = true; googleButton.innerHTML = `${icon("loader", "icon spin")} Validando sessão…`;
     try { await validateAndEnter(session); }
-    catch (error) { clearSession(); showAuthError(error); }
+    catch (error) {
+      /* Só descarta a sessão guardada quando o servidor a recusou; sem rede,
+         ela continua valendo para a próxima abertura. */
+      if (error?.status === 401 || error?.status === 403) clearSession();
+      showAuthError(error instanceof TypeError ? new Error("Sem conexão com o servidor. Recarregue a página para tentar de novo.") : error);
+    }
     finally { googleButton.disabled = false; googleButton.innerHTML = `<svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.6 30.2 0 24 0 14.6 0 6.4 5.4 2.5 13.2l7.8 6.1C12.2 13.3 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v9.1h12.4c-.5 2.9-2.2 5.3-4.7 6.9l7.3 5.7c4.3-3.9 6.8-9.7 6.8-17.1z"/><path fill="#FBBC05" d="M10.3 28.7c-.5-1.4-.8-2.9-.8-4.7s.3-3.3.8-4.7l-7.8-6.1C.9 16.6 0 20.2 0 24s.9 7.4 2.5 10.8l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.3-5.7c-2 1.4-4.7 2.3-8.6 2.3-6.4 0-11.8-3.8-13.7-9.1l-7.8 6.1C6.4 42.6 14.6 48 24 48z"/></svg> Continuar com o Google`; }
   }
 
