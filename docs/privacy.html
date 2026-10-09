@@ -17,7 +17,7 @@
             <p class="eyebrow">Gain Calculator</p>
             <h1>Política de Privacidade</h1>
             <p class="subtitle">Como tratamos seus dados no Gain Calculator</p>
-            <p class="meta">Versão 12 &middot; Vigente desde 7 de outubro de 2026</p>
+            <p class="meta">Versão 14 &middot; Vigente desde 9 de outubro de 2026</p>
         </header>
 
         <section class="legal-section">
@@ -42,7 +42,7 @@ Contato para qualquer assunto desta Política, inclusive exercício de direitos:
 • Chave Pix de recebimento (opcional): se você utilizar o recurso de receber pagamentos por QR Pix, os dados que você mesmo informa — chave, tipo de chave, nome do recebedor e cidade — ficam guardados no dispositivo e sincronizados na sua conta para montar o QR Code. Esses dados servem apenas para gerar o código que você mostra ao passageiro; nós não intermediamos, recebemos nem temos visibilidade sobre esses pagamentos, que ocorrem diretamente entre você e o pagador.
 • Estatísticas de uso: ver a seção 6 desta Política, que descreve em detalhe o que é medido e o que deliberadamente não é.
 • Distância percorrida (opcional): se você conceder a permissão de localização, pedida ao ativar o monitoramento, o app lê a localização do aparelho enquanto o monitoramento estiver ativo e guarda apenas quantos quilômetros foram rodados em cada turno e em que intervalo de horário. Nenhuma coordenada é gravada e nada disso sai do seu aparelho — ver a seção 26.
-• Dados de pagamento da assinatura: quando você adquire uma licença, recebemos do processador de pagamento o status (aprovado, pendente, recusado), o método utilizado, o valor e o e-mail informado no checkout. Não armazenamos números completos de cartão; eles são processados diretamente pela operadora.</p>
+• Dados de pagamento da assinatura: quando você assina um plano pela Google Play, recebemos da Google o identificador da compra, o plano, o número do pedido, a situação da assinatura (ativa, cancelada, vencida ou estornada), a data até quando ela vale, se renova sozinha e o país da conta Google. Para prender a compra à sua conta do Gain, o app envia à Google um código derivado do identificador da sua conta (um resumo criptográfico, que não revela nome, e-mail nem telefone). Os dados do cartão e das demais formas de pagamento ficam com a Google e não chegam a nós. Nas compras feitas antes por Pix ou cartão (Mercado Pago), recebemos do processador o status (aprovado, pendente, recusado), o método utilizado, o valor e o e-mail informado no checkout; também nesse caso não armazenamos números de cartão.</p>
         </section>
 
         <section class="legal-section">
@@ -215,11 +215,12 @@ Para os dados de passageiros e terceiros (seção 3), atuamos como operador e o 
 • Supabase (Supabase Inc.): provedor de autenticação, banco de dados e funções serverless. Recebe seus dados de cadastro (incluindo número de telefone), hash do dispositivo, dados financeiros e das corridas, estatísticas de uso e configurações sincronizados.
 • Google LLC (Sign in with Google), se você optar por entrar com o Google: a Google sabe que você entrou no Gain Calculator e nos devolve nome, e-mail e o endereço da sua foto de perfil.
 • Serviço de mensageria por WhatsApp/SMS: recebe o seu número de telefone para entregar o código de verificação (OTP) e os comunicados de serviço da seção 17. Utilizamos uma infraestrutura de envio operada por nós, sobre a plataforma WhatsApp. Não compartilhamos com esse canal qualquer outro dado pessoal além do número e do conteúdo da mensagem.
-• Mercado Pago (Mercado Pago S.A.): processamento de pagamentos da assinatura. Recebe o valor, o método de pagamento e o e-mail informado por você no checkout.
+• Mercado Pago (Mercado Pago S.A.): processou os pagamentos por Pix e cartão feitos antes da cobrança pela Google Play. Recebeu o valor, o método de pagamento e o e-mail informado por você no checkout.
 • Google LLC (Google ML Kit): biblioteca de reconhecimento de texto. O processamento ocorre localmente no dispositivo; não há envio das imagens da sua tela para a Google.
 • Google LLC (Play Integrity API): para verificar que o app é a versão legítima distribuída pela Play Store e que o aparelho não foi adulterado, o app solicita ao Google um atestado de integridade. A Google recebe sinais técnicos do dispositivo e do aplicativo; nós recebemos apenas o resultado da verificação. Esse mecanismo protege sua licença contra fraude e não coleta dados pessoais seus.
-• Google LLC (Google Play): distribuição do aplicativo e de suas atualizações.
+• Google LLC (Google Play): distribuição do aplicativo e de suas atualizações e cobrança das assinaturas dos planos. A Google processa o pagamento com a forma cadastrada na sua conta Google, sob a política de privacidade dela, e nos informa a situação da assinatura (seção 2).
 • OpenAI (OpenAI, L.L.C., EUA): processa as conversas com a Gain IA e com o Gain Copiloto, e somente quando você usa um dos dois. Recebe os dados do Gain enviados como contexto da pergunta, as mensagens, imagens e áudios que você manda e o texto das respostas faladas, para gerar a voz. Detalhes nas seções 27 e 28.
+• ElevenLabs (Eleven Labs, Inc., EUA): gera a voz premium do Gain Copiloto, só para quem tem o plano Ultra e escolhe uma voz premium. Recebe apenas o texto das respostas que serão faladas e as frases fixas do cartão do Copiloto; não recebe a sua voz nem os dados do Gain usados como contexto. Detalhes na seção 28.
 • Reconhecedor de voz do Android (do Google ou do fabricante do aparelho): transcreve a sua fala quando você usa o Gain Copiloto. Quando o aparelho reconhece a fala no próprio dispositivo, a voz não sai do celular; nos demais, o reconhecedor padrão pode processá-la online, sob a política de privacidade de quem o fornece. Detalhes na seção 28.
 
 Não vendemos seus dados pessoais a terceiros. Não compartilhamos seus dados para publicidade direcionada. Nenhum dado é compartilhado com as plataformas de transporte (Uber, 99, inDrive e outras), com as quais não temos qualquer vínculo.</p>
@@ -227,7 +228,7 @@ Não vendemos seus dados pessoais a terceiros. Não compartilhamos seus dados pa
 
         <section class="legal-section">
             <h2>15. Transferência internacional de dados</h2>
-            <p>Parte da nossa infraestrutura e dos nossos operadores está sediada fora do Brasil. Em particular, os dados sincronizados na sua conta são armazenados em servidores do Supabase, os serviços da Google (autenticação, integridade e distribuição do app) são prestados por empresa estrangeira e as conversas com a Gain IA e com o Gain Copiloto são processadas pela OpenAI, nos Estados Unidos.
+            <p>Parte da nossa infraestrutura e dos nossos operadores está sediada fora do Brasil. Em particular, os dados sincronizados na sua conta são armazenados em servidores do Supabase, os serviços da Google (autenticação, integridade e distribuição do app) são prestados por empresa estrangeira e as conversas com a Gain IA e com o Gain Copiloto são processadas pela OpenAI, nos Estados Unidos; no plano Ultra, a voz premium das respostas do Copiloto é gerada pela ElevenLabs, também nos Estados Unidos.
 
 Essas transferências são realizadas nos termos do art. 33 da LGPD, quando necessárias para a execução do contrato celebrado com você e mediante cláusulas contratuais que obrigam o operador a garantir nível de proteção compatível com o da legislação brasileira. Você pode solicitar informações adicionais sobre essas transferências pelo e-mail <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a>.</p>
         </section>
@@ -367,6 +368,8 @@ O Gain Copiloto, o modo por voz da Gain IA, segue as regras desta seção, com o
 COMO ELE OUVE. A fala é transcrita pelo reconhecedor de voz do próprio Android. Quando o aparelho oferece reconhecimento no dispositivo, a voz não sai do celular; nos demais, o reconhecedor padrão do aparelho (em geral o do Google ou do fabricante) pode processá-la online, sob a política de quem o fornece. Sem reconhecedor em português, o áudio é gravado e transcrito como na seção 27. Depois de responder, o Copiloto volta a ouvir sozinho no máximo cinco vezes seguidas sem um toque seu, e encerra quando você diz que terminou. Enquanto ele ouve, o cartão do Copiloto fica na tela mostrando a sua voz.
 
 O QUE VAI PARA A OPENAI. O texto do que você falou e os dados do Gain usados como contexto, como na seção 27, e o texto da resposta, para ser convertido em voz. Quando você pede algo no celular, a IA recebe apenas a sua frase — por exemplo, o nome do contato, do aplicativo ou do lugar que você disse — e devolve qual comando executar.
+
+VOZ PREMIUM (PLANO ULTRA). Se você tem o Ultra e escolhe uma voz premium em Ajustes › Personalização, o texto da resposta que será falada vai para a ElevenLabs (seção 14), que devolve o áudio na hora; esse texto pode conter os valores da resposta, como o quanto você ganhou. A sua voz, a sua pergunta e os dados do Gain usados como contexto não vão para a ElevenLabs. Nós guardamos só a quantidade de caracteres falados, para controlar a franquia de voz do plano, junto dos metadados da seção 27. As amostras das vozes, nos Ajustes, usam textos de exemplo, sem dado seu. Sem a voz premium, a resposta é falada pela voz padrão, como acima.
 
 O QUE ELE PODE FAZER NO CELULAR, sempre a seu pedido: abrir um aplicativo; voltar ao aplicativo anterior ou à tela inicial; voltar uma tela, abrir os aplicativos recentes, abrir as notificações e tirar um print (estes quatro pelo serviço de acessibilidade); abrir a navegação até um endereço ou buscar um lugar próximo no aplicativo de mapas; fazer uma ligação; deixar uma mensagem pronta no WhatsApp ou no SMS; tocar, pausar e trocar a música; ajustar o volume; ligar e desligar a lanterna; criar um timer ou um alarme no aplicativo de relógio; abrir telas de ajustes do Android; e fazer uma pesquisa na web.
 
