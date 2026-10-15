@@ -19,7 +19,8 @@
     services: { eyebrow: "Sistema", title: "Status dos serviços", description: "Disponibilidade e latência das dependências críticas do app." },
     diagnostics: { eyebrow: "Sistema", title: "Diagnósticos", description: "Fila de incompatibilidades, ocorrências e logs enviados pelo app." },
     whatsapp: { eyebrow: "Sistema", title: "WhatsApp", description: "Conexão da Evolution API e desempenho das verificações de telefone." },
-    traces: { eyebrow: "Sistema", title: "Rastros", description: "Rastro das corridas enviado pelos aparelhos com o envio ligado." }
+    traces: { eyebrow: "Sistema", title: "Rastros", description: "Rastro das corridas enviado pelos aparelhos com o envio ligado." },
+    vitals: { eyebrow: "Sistema", title: "Travamentos", description: "Android vitals da Play: travamentos, ANRs e os avisos mandados por WhatsApp." }
   };
   /* Endereços antigos continuam abrindo: as duas páginas viraram seções de
      "Uso e adoção". */
@@ -46,6 +47,7 @@
     whatsapp: null,
     verification: null,
     traces: null,
+    vitals: null,
     versions: null,
     news: null,
     period: storedPeriod(),
@@ -620,7 +622,8 @@
       loadHealth({ quiet: true }),
       loadGrowth({ quiet: true }),
       loadSales({ quiet: true }),
-      loadAdoption({ quiet: true })
+      loadAdoption({ quiet: true }),
+      loadVitals({ quiet: true })
     ]);
   }
 
@@ -635,7 +638,7 @@
         return toast("Assistente atualizado", "success", state.ai.dirty ? "Suas alterações em edição foram preservadas." : "Configuração e monitoramento sincronizados.");
       }
       const loaders = {
-        overview: () => Promise.allSettled([loadDevices({ quiet: true }), loadDiagnostics({ quiet: true }), loadHealth({ quiet: true }), loadGrowth({ quiet: true }), loadSales({ quiet: true }), loadAdoption({ quiet: true })]),
+        overview: () => Promise.allSettled([loadDevices({ quiet: true }), loadDiagnostics({ quiet: true }), loadHealth({ quiet: true }), loadGrowth({ quiet: true }), loadSales({ quiet: true }), loadAdoption({ quiet: true }), loadVitals({ quiet: true })]),
         growth: () => Promise.allSettled([loadGrowth({ quiet: true }), loadDevices({ quiet: true })]),
         sales: () => Promise.allSettled([loadSales({ quiet: true }), loadDevices({ quiet: true })]),
         adoption: () => Promise.allSettled([loadAdoption({ quiet: true }), loadStatistics({ quiet: true })]),
@@ -643,6 +646,7 @@
         diagnostics: () => loadDiagnostics({ quiet: true }),
         news: () => loadNews({ quiet: true }),
         traces: () => loadTraces({ quiet: true }),
+        vitals: () => loadVitals({ quiet: true }),
         services: () => loadHealth({ quiet: true }),
         whatsapp: () => Promise.allSettled([loadWhatsapp({ quiet: true }), loadVerification({ quiet: true })]),
         broadcast: () => Promise.allSettled([loadWhatsapp({ quiet: true }), loadRecipients({ quiet: true })])
@@ -701,6 +705,7 @@
     }
     if (page === "users" && !state.versions && !state.loading.versions) loadVersions();
     if (page === "traces" && !state.traces && !state.loading.traces) loadTraces();
+    if (page === "vitals" && !state.vitals && !state.loading.vitals) loadVitals();
     if (page === "news" && !state.news && !state.loading.news) loadNews();
     if (page === "assistant") {
       if (!state.ai.config && !state.loading.aiConfig) loadAiAssistant();
@@ -1082,6 +1087,10 @@
       add((a.versions?.outdated || []).length, "blue", "package", "Usando versão antiga do app", "Ativos nos últimos 14 dias", "adoption");
     }
     add((state.diagnostics || []).filter((report) => report.status === "new").length, "purple", "bug", "Diagnósticos para revisar", "Relatos técnicos enviados pelo app", "diagnostics");
+    if (state.vitals) {
+      add(vitalsOverLimit().length, "red", "alert", "Travamentos acima do limite da Play", "Média de 28 dias do Android vitals; a Play reduz a visibilidade do app", "vitals");
+      add(newCrashIssues().length, "yellow", "bug", "Travamentos novos na semana", "Problemas que a Play agrupou pela primeira vez nos últimos 7 dias", "vitals");
+    }
     return items.sort((x, y) => TONE_RANK[x.tone] - TONE_RANK[y.tone]);
   }
 
@@ -2006,6 +2015,73 @@
     const detail = state.detail;
     const trace = detail.data;
     els.detailContent.innerHTML = `<header class="detail-top"><button class="icon-button" data-close-detail aria-label="Fechar detalhe">${icon("x")}</button><div class="detail-top-copy"><span class="eyebrow">Rastro das corridas</span><h2 id="detail-title">${esc(index.user_email || account?.email || detail.userId)}</h2></div>${account ? `<button class="button button--secondary button--compact" data-open-user="${esc(account.key)}">Abrir conta</button>` : ""}</header><div class="detail-body"><div class="toolbar"><select id="trace-detail-hours" class="toolbar-select"><option value="6"${detail.hours === 6 ? " selected" : ""}>Últimas 6 horas</option><option value="24"${detail.hours === 24 ? " selected" : ""}>Últimas 24 horas</option><option value="72"${detail.hours === 72 ? " selected" : ""}>Últimas 72 horas</option><option value="168"${detail.hours === 168 ? " selected" : ""}>Últimos 7 dias</option></select><button class="button button--secondary button--compact" data-reload-trace="${esc(detail.userId)}">${icon("refresh")} Atualizar</button>${trace?.text ? `<button class="button button--secondary button--compact" data-copy-trace="detail">${icon("copy")} Copiar</button><button class="button button--secondary button--compact" data-download-trace="detail">${icon("download")} Baixar</button>` : ""}</div><div class="notice notice--info">${icon("shield")}<span>Este conteúdo pode conter informações sensíveis (endereços, passageiros). Use apenas para investigar a leitura.</span></div>${detail.loading ? loadingState("Costurando os lotes em ordem cronológica…") : ""}${detail.error ? errorState(detail.error) : ""}${trace ? `<div class="detail-metrics"><div class="detail-metric"><small>Lotes</small><strong>${count(trace.batches)}</strong></div><div class="detail-metric"><small>Bytes descartados</small><strong>${bytes(trace.skipped_bytes)}</strong></div><div class="detail-metric"><small>Intervalo</small><strong>${count(detail.hours)}h</strong></div></div>${trace.text ? `<div class="log-box" style="max-height:calc(100dvh - 16.875rem)"><pre>${esc(trace.text)}</pre></div>` : emptyState("Sem eventos no intervalo", "Nenhum lote foi recebido neste período.", "terminal")}` : ""}</div>`;
+  }
+
+  /* Travamentos (Android vitals) ----------------------------------------- */
+  /* A função play-vitals lê a API de relatórios da Play todo dia às 09:20 e
+     manda WhatsApp quando uma taxa passa do limite ou surge travamento novo.
+     Taxas chegam em fração (0,0109 = 1,09%). */
+  function loadVitals(options = {}) {
+    return loadResource("vitals", () => rpc("admin_app_health", {}), (result) => {
+      if (result?.success === false) throw new Error("Os dados de travamentos não estão disponíveis.");
+      state.vitals = result;
+    }, options);
+  }
+
+  function vitalsPct(value) {
+    return value == null ? "—" : `${(asNumber(value) * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+  }
+
+  function latestVitalsDay() {
+    return [...(state.vitals?.days || [])].reverse().find((day) => day.user_perceived_crash_rate_28d != null || day.user_perceived_anr_rate_28d != null) || null;
+  }
+
+  /* As taxas de 28 dias acima do limite da Play no dia mais recente. */
+  function vitalsOverLimit() {
+    const day = latestVitalsDay(), limits = state.vitals?.thresholds || {};
+    if (!day) return [];
+    return [
+      day.user_perceived_crash_rate_28d != null && asNumber(day.user_perceived_crash_rate_28d) > asNumber(limits.crash) ? "crash" : null,
+      day.user_perceived_anr_rate_28d != null && asNumber(day.user_perceived_anr_rate_28d) > asNumber(limits.anr) ? "anr" : null
+    ].filter(Boolean);
+  }
+
+  function newCrashIssues() {
+    return (state.vitals?.issues || []).filter((issue) => ["CRASH", "ANR"].includes(issue.type) && Date.now() - asNumber(issue.first_seen_ms) < 7 * DAY_MS);
+  }
+
+  function renderVitals() {
+    const header = pageHeading("Travamentos e ANRs", "O Android vitals da Google Play, lido todo dia às 09:20. Taxa acima do limite ou travamento novo vira WhatsApp para o administrador.");
+    if (!state.vitals && state.loading.vitals) return header + loadingState("Consultando o Android vitals…");
+    if (state.errors.vitals && !state.vitals) return header + errorState(state.errors.vitals, "vitals");
+    const data = state.vitals || {};
+    const limits = data.thresholds || { crash: 0.0109, anr: 0.0047 };
+    const days = data.days || [], issues = data.issues || [], alerts = data.alerts || [];
+    const day = latestVitalsDay();
+    const over = vitalsOverLimit();
+    const users = [...days].reverse().find((item) => item.distinct_users != null)?.distinct_users;
+    const tone = (value, limit) => value == null ? "blue" : asNumber(value) > asNumber(limit) ? "red" : "green";
+    const tiles = `<section class="metric-grid">${metricCard("Travamentos (28 dias)", vitalsPct(day?.user_perceived_crash_rate_28d), `Limite da Play: ${vitalsPct(limits.crash)}`, tone(day?.user_perceived_crash_rate_28d, limits.crash), "bug")}${metricCard("ANR (28 dias)", vitalsPct(day?.user_perceived_anr_rate_28d), `Limite da Play: ${vitalsPct(limits.anr)}`, tone(day?.user_perceived_anr_rate_28d, limits.anr), "clock")}${metricCard("Usuários no dia", users == null ? "—" : count(users), day ? `Dado de ${esc(dayShort(day.day))} (fuso da Play)` : "Sem dado da Play ainda", "blue", "users")}${metricCard("Última leitura", data.last_fetch_ms ? relative(data.last_fetch_ms) : "—", "A função roda uma vez por dia", "yellow", "refresh")}</section>`;
+    const status = over.length
+      ? `<div class="notice notice--warning">${icon("alert")}<span>${over.includes("crash") ? "Travamentos" : "ANRs"}${over.length > 1 ? " e ANRs" : ""} acima do limite da Play na média de 28 dias: o app perde visibilidade na loja até a taxa voltar.</span></div>`
+      : days.length ? plainNotice("Dentro dos limites da Play.") : `<div class="notice notice--info">${icon("shield")}<span>A Play ainda não mostra dados: o Android vitals só aparece com um número mínimo de usuários por dia e chega com uns dois dias de atraso. A leitura diária já está ligada.</span></div>`;
+    const dayRows = [...days].reverse().slice(0, 14).map((item) => `<div class="info-row"><span>${esc(dayShort(item.day))}</span><span>Travamentos ${vitalsPct(item.user_perceived_crash_rate)} · ANR ${vitalsPct(item.user_perceived_anr_rate)}${item.distinct_users != null ? ` · ${count(item.distinct_users)} usuários` : ""}</span></div>`).join("");
+    const issueRows = issues.map((issue) => {
+      const kind = issue.type === "ANR" ? pill("ANR", "yellow") : issue.type === "CRASH" ? pill("Travamento", "red") : pill("Não fatal", "neutral");
+      const fresh = Date.now() - asNumber(issue.first_seen_ms) < 7 * DAY_MS ? ` ${pill("Novo", "purple")}` : "";
+      const versions = issue.first_version == null && issue.last_version == null ? ""
+        : issue.first_version === issue.last_version || issue.last_version == null || issue.first_version == null ? ` · versão ${esc(issue.last_version ?? issue.first_version)}`
+        : ` · versões ${esc(issue.first_version)}–${esc(issue.last_version)}`;
+      const link = issue.issue_uri ? ` <a class="text-link" href="${esc(issue.issue_uri)}" target="_blank" rel="noopener">Abrir na Play ${icon("external")}</a>` : "";
+      return `<div class="info-row"><span>${kind}${fresh}</span><span><strong>${esc(issue.cause || "Sem descrição")}</strong><br><small class="cell-secondary">${esc(issue.location || "")}</small><small class="cell-secondary">${count(issue.users_7d)} usuários · ${count(issue.reports_7d)} ocorrências em 7 dias${versions} · última ${relative(issue.last_report_ms).toLowerCase()}${link}</small></span></div>`;
+    }).join("");
+    const alertRows = alerts.map((alert) => `<div class="info-row"><span>${esc(dateTime(alert.sent_ms))}</span><span>${esc(String(alert.key).replace(/^problema:.*\//, "problema ").replace(/:/, " · "))}</span></div>`).join("");
+    return header + tiles + status +
+      `<section class="content-grid content-grid--wide-left" style="margin-top:0.9375rem">` +
+      panel("Problemas dos últimos 7 dias", "Agrupados pela Play, do mais recente", issues.length ? `<div class="info-list">${issueRows}</div>` : plainNotice("Nenhum travamento nem ANR reportado.")) +
+      panel("Dia a dia", "Taxas percebidas pelo usuário em cada dia", days.length ? `<div class="info-list">${dayRows}</div>` : plainNotice("Sem dias com dado ainda.", "clock")) +
+      `</section>` +
+      panel("Avisos enviados", "Cada aviso sai uma vez por WhatsApp", alerts.length ? `<div class="info-list">${alertRows}</div>` : plainNotice("Nenhum aviso enviado até agora."));
   }
 
   /* Serviços ------------------------------------------------------------- */
@@ -4063,7 +4139,7 @@
     const providerInput = state.page === "assistant" && state.ai.tab === "connection" ? $("ai-provider-key") : null;
     const providerFocused = providerInput && active === providerInput;
     const aiFocus = state.page === "assistant" && active?.matches("[data-ai-field]") ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
-    const renderers = { overview: renderOverview, growth: renderGrowth, sales: renderSales, adoption: renderAdoption, users: renderUsers, diagnostics: renderDiagnostics, traces: renderTraces, news: renderNews, assistant: renderAiAssistant, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
+    const renderers = { overview: renderOverview, growth: renderGrowth, sales: renderSales, adoption: renderAdoption, users: renderUsers, diagnostics: renderDiagnostics, traces: renderTraces, vitals: renderVitals, news: renderNews, assistant: renderAiAssistant, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
     els.page.innerHTML = renderers[state.page]?.() || "";
     if (providerInput && $("ai-provider-key")) {
       providerInput.disabled = state.ai.providerSaving;
@@ -4089,7 +4165,7 @@
   }
 
   function retryResource(resource) {
-    const loaders = { growth: loadGrowth, sales: loadSales, adoption: loadAdoption, devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
+    const loaders = { growth: loadGrowth, sales: loadSales, adoption: loadAdoption, devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, vitals: loadVitals, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
     loaders[resource]?.();
   }
 
