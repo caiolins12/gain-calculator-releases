@@ -8,18 +8,24 @@
   const DAY_MS = 86_400_000;
 
   const PAGES = {
-    overview: { eyebrow: "Visão", title: "Visão geral", description: "Prioridades, atividade e saúde da operação em um só lugar." },
-    users: { eyebrow: "Operação", title: "Usuários", description: "Contas, licenças, dispositivos e uso do monitoramento." },
-    diagnostics: { eyebrow: "Operação", title: "Diagnósticos", description: "Fila de incompatibilidades, ocorrências e logs enviados pelo app." },
-    traces: { eyebrow: "Operação", title: "Rastros de teste", description: "Linha do tempo operacional dos participantes do programa de testes." },
-    analytics: { eyebrow: "Produto", title: "Uso e adoção", description: "Alcance, estados das solicitações e comportamento dentro do produto." },
-    versions: { eyebrow: "Produto", title: "Versões", description: "Release publicada, adoção instalada e contas que precisam atualizar." },
+    overview: { eyebrow: "Painel", title: "Visão geral", description: "Quem chegou, quem usa, quem paga e o que precisa de atenção." },
+    growth: { eyebrow: "Negócio", title: "Novos usuários", description: "Funil do cadastro à assinatura e onde as pessoas param." },
+    sales: { eyebrow: "Negócio", title: "Vendas", description: "Receita, assinantes, testes acabando e quem foi embora." },
+    adoption: { eyebrow: "Negócio", title: "Uso e adoção", description: "Quantos usam, quanto, de qual plataforma e quem parou." },
+    users: { eyebrow: "Clientes", title: "Usuários", description: "Contas, licenças, dispositivos e uso do monitoramento." },
+    broadcast: { eyebrow: "Clientes", title: "Comunicados", description: "Envio controlado de mensagens para números verificados ou uma lista manual." },
+    assistant: { eyebrow: "Produto", title: "Gain IA", description: "Modelo, gasto com a OpenAI, experiência no app e uso por conta." },
     news: { eyebrow: "Produto", title: "Novidades", description: "Cards e janelas da seção Novidades da tela inicial do app." },
-    assistant: { eyebrow: "Produto", title: "Assistente IA", description: "Modelo, gasto com a OpenAI, experiência no app e uso por conta." },
-    services: { eyebrow: "Serviços", title: "Status dos serviços", description: "Disponibilidade e latência das dependências críticas do app." },
-    whatsapp: { eyebrow: "Serviços", title: "WhatsApp", description: "Conexão da Evolution API e desempenho das verificações de telefone." },
-    broadcast: { eyebrow: "Serviços", title: "Comunicados", description: "Envio controlado de mensagens para números verificados ou uma lista manual." }
+    services: { eyebrow: "Sistema", title: "Status dos serviços", description: "Disponibilidade e latência das dependências críticas do app." },
+    diagnostics: { eyebrow: "Sistema", title: "Diagnósticos", description: "Fila de incompatibilidades, ocorrências e logs enviados pelo app." },
+    whatsapp: { eyebrow: "Sistema", title: "WhatsApp", description: "Conexão da Evolution API e desempenho das verificações de telefone." },
+    traces: { eyebrow: "Sistema", title: "Rastros", description: "Rastro das corridas enviado pelos aparelhos com o envio ligado." }
   };
+  /* Endereços antigos continuam abrindo: as duas páginas viraram seções de
+     "Uso e adoção". */
+  const PAGE_ALIASES = { analytics: "adoption", versions: "adoption" };
+  const PERIOD_KEY = "gain_admin_period";
+  const PERIODS = [7, 30, 90];
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -42,6 +48,11 @@
     traces: null,
     versions: null,
     news: null,
+    period: storedPeriod(),
+    growth: null,
+    sales: null,
+    adoption: null,
+    growthStage: "all",
     ai: { config: null, draft: null, dirty: false, saving: false, tab: "overview", days: 30, chart: "cost", eventFilter: "all", metrics: null, events: null, models: null, available: null, probes: {}, fx: null, fxLoading: false, health: null, provider: null, providerSaving: false, providerError: "", saveError: "", savedAt: null, plans: null, granting: false },
     now: Date.now(),
     serverNow: null,
@@ -60,6 +71,11 @@
   };
 
   let refreshPromise = null;
+
+  function storedPeriod() {
+    try { const value = Number(localStorage.getItem(PERIOD_KEY)); return PERIODS.includes(value) ? value : 30; }
+    catch { return 30; }
+  }
 
   /* Utilidades ----------------------------------------------------------- */
   function icon(name, className = "icon") {
@@ -463,7 +479,19 @@
         });
       }
     });
-    return [...grouped.values()];
+    const accounts = [...grouped.values()];
+    accounts.forEach((account) => { account.isRobot = isReviewRobot(account); });
+    return accounts;
+  }
+
+  /* Robô de revisão da Google: a cada versão enviada à Play nasce uma conta
+     "nome.12345@gmail.com" (sempre num OnePlus8Pro) que abre o app e nunca
+     confirma telefone. Em 15/10/2026 eram ~30 das ~34 contas "novas" de 45
+     dias. Mesma regra do servidor (admin_painel_contas): confirmou telefone
+     ou usou a leitura, é gente. */
+  const REVIEW_ROBOT_EMAIL = /^[a-z]+\.[0-9]{5}@gmail\.com$/;
+  function isReviewRobot(account) {
+    return Boolean(account.userId) && REVIEW_ROBOT_EMAIL.test(String(account.email || "")) && !account.phoneConfirmed && account.totalUsage === 0;
   }
 
   /* Três estados possíveis, e a diferença importa: quem confirmou o número,
@@ -473,7 +501,7 @@
     return account.phoneConfirmed ? "verified" : "pending";
   }
 
-  function realAccounts() { return state.accounts.filter((a) => a.userId && !a.isInternal); }
+  function realAccounts() { return state.accounts.filter((a) => a.userId && !a.isInternal && !a.isRobot); }
   function uniqueDevices(accounts = realAccounts()) { return new Set(accounts.flatMap((a) => a.devices.map((d) => d.hash))).size; }
 
   function syncNavBadges() {
@@ -553,12 +581,46 @@
     }, options);
   }
 
+  /* Métricas de negócio: as três respondem ao mesmo período (7/30/90 dias),
+     escolhido no topo das páginas e guardado neste navegador. */
+  const METRIC_RPCS = { growth: "admin_growth_metrics", sales: "admin_sales_metrics", adoption: "admin_adoption_metrics" };
+
+  function loadMetric(name, options = {}) {
+    const days = state.period;
+    return loadResource(name, () => rpc(METRIC_RPCS[name], { p_days: days }), (result) => {
+      if (result.status !== "ok") throw new Error("Sem permissão para consultar as métricas do negócio.");
+      state[name] = result;
+    }, options);
+  }
+  const loadGrowth = (options) => loadMetric("growth", options);
+  const loadSales = (options) => loadMetric("sales", options);
+  const loadAdoption = (options) => loadMetric("adoption", options);
+
+  function metricStale(name) {
+    return !state.loading[name] && (!state[name] || asNumber(state[name].period?.days) !== state.period);
+  }
+
+  function ensureMetrics(names, options = {}) {
+    return Promise.allSettled(names.filter(metricStale).map((name) => loadMetric(name, options)));
+  }
+
+  function setPeriod(days) {
+    if (!PERIODS.includes(days) || days === state.period) return;
+    state.period = days;
+    try { localStorage.setItem(PERIOD_KEY, String(days)); } catch { /* só conveniência */ }
+    const pageMetrics = { overview: ["growth", "sales", "adoption"], growth: ["growth"], sales: ["sales"], adoption: ["adoption"] }[state.page] || [];
+    pageMetrics.forEach((name) => loadMetric(name));
+    renderCurrentPage();
+  }
+
   async function loadCore() {
     await Promise.allSettled([
       loadDevices({ quiet: true }),
-      loadStatistics({ quiet: true }),
       loadDiagnostics({ quiet: true }),
-      loadHealth({ quiet: true })
+      loadHealth({ quiet: true }),
+      loadGrowth({ quiet: true }),
+      loadSales({ quiet: true }),
+      loadAdoption({ quiet: true })
     ]);
   }
 
@@ -573,11 +635,12 @@
         return toast("Assistente atualizado", "success", state.ai.dirty ? "Suas alterações em edição foram preservadas." : "Configuração e monitoramento sincronizados.");
       }
       const loaders = {
-        overview: () => Promise.allSettled([loadDevices({ quiet: true }), loadStatistics({ quiet: true }), loadDiagnostics({ quiet: true }), loadHealth({ quiet: true })]),
+        overview: () => Promise.allSettled([loadDevices({ quiet: true }), loadDiagnostics({ quiet: true }), loadHealth({ quiet: true }), loadGrowth({ quiet: true }), loadSales({ quiet: true }), loadAdoption({ quiet: true })]),
+        growth: () => Promise.allSettled([loadGrowth({ quiet: true }), loadDevices({ quiet: true })]),
+        sales: () => Promise.allSettled([loadSales({ quiet: true }), loadDevices({ quiet: true })]),
+        adoption: () => Promise.allSettled([loadAdoption({ quiet: true }), loadStatistics({ quiet: true })]),
         users: () => Promise.allSettled([loadDevices({ quiet: true }), loadVersions({ quiet: true })]),
         diagnostics: () => loadDiagnostics({ quiet: true }),
-        analytics: () => loadStatistics({ quiet: true }),
-        versions: () => loadVersions({ quiet: true }),
         news: () => loadNews({ quiet: true }),
         traces: () => loadTraces({ quiet: true }),
         services: () => loadHealth({ quiet: true }),
@@ -594,7 +657,8 @@
 
   /* Navegação ------------------------------------------------------------ */
   function pageFromHash() {
-    const value = location.hash.replace(/^#\/?/, "").split("/")[0];
+    const raw = location.hash.replace(/^#\/?/, "").split("/")[0];
+    const value = PAGE_ALIASES[raw] || raw;
     return PAGES[value] ? value : "overview";
   }
 
@@ -628,7 +692,14 @@
   }
 
   function activatePageData(page) {
-    if (["users", "versions"].includes(page) && !state.versions && !state.loading.versions) loadVersions();
+    if (page === "overview") ensureMetrics(["growth", "sales", "adoption"]);
+    if (page === "growth") ensureMetrics(["growth"]);
+    if (page === "sales") ensureMetrics(["sales"]);
+    if (page === "adoption") {
+      ensureMetrics(["adoption"]);
+      if (!state.statistics && !state.loading.statistics) loadStatistics({ quiet: true });
+    }
+    if (page === "users" && !state.versions && !state.loading.versions) loadVersions();
     if (page === "traces" && !state.traces && !state.loading.traces) loadTraces();
     if (page === "news" && !state.news && !state.loading.news) loadNews();
     if (page === "assistant") {
@@ -688,97 +759,557 @@
     }, 60_000);
   }
 
+  /* Componentes do painel de negócio ------------------------------------- */
+  const STAGES = [
+    { key: 0, label: "Criou a conta", short: "Cadastro" },
+    { key: 1, label: "Pediu o código", short: "Pediu código" },
+    { key: 2, label: "Confirmou o telefone", short: "Telefone" },
+    { key: 3, label: "Ligou a leitura", short: "Ligou leitura" },
+    { key: 4, label: "Leu a 1ª solicitação", short: "1ª leitura" },
+    { key: 5, label: "Voltou outro dia", short: "Voltou" },
+    { key: 6, label: "Assinou", short: "Assinou" }
+  ];
+  /* O que provavelmente aconteceu com quem parou depois de cada etapa. */
+  const STAGE_DROP = [
+    "Abriram o app e pararam na tela do telefone, sem pedir o código.",
+    "Pediram o código e não confirmaram. Veja as falhas de envio em WhatsApp.",
+    "Confirmaram o telefone e não ligaram a leitura: é o passo da permissão de acessibilidade.",
+    "A leitura ligou e nada foi lido: não rodaram com a Uber ou a 99 aberta, ou a leitura falha no aparelho.",
+    "Usaram um dia só e não voltaram.",
+    "Usam o app, mas ainda não pagaram (muitos ainda estão no teste de 30 dias)."
+  ];
+  const STAGE_FILTERS = [["all", "Todas"], ["0-1", "Antes do telefone"], ["2", "Sem leitura"], ["3", "Nada lido"], ["4", "Usou 1 dia"], ["5", "Usando"], ["6", "Pagantes"]];
+  const TIER_LABELS = { essential: "Essencial", pro: "Pro", ultra: "Ultra", pack: "Recarga" };
+  const SOURCE_LABELS = { play: "Google Play", pix: "Pix" };
+  /* Par categórico validado (CVD e visão normal) contra a superfície escura. */
+  const SERIES_COLORS = { play: "#3987e5", pix: "#d95926" };
+  const TONE_RANK = { red: 0, yellow: 1, blue: 2, purple: 3 };
+
+  function periodControl() {
+    return `<div class="segmented" role="group" aria-label="Período analisado">${PERIODS.map((days) => `<button type="button" data-period="${days}" aria-pressed="${state.period === days}">${days} dias</button>`).join("")}</div>`;
+  }
+
+  function periodCopy(days = state.period) { return `nos últimos ${days} dias`; }
+
+  function compactBrl(cents) {
+    const value = asNumber(cents) / 100;
+    if (Math.abs(value) >= 1000) return `R$ ${(value / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil`;
+    return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: Number.isInteger(value) ? 0 : 2, maximumFractionDigits: 2 });
+  }
+
+  function hours(ms) {
+    const value = asNumber(ms) / 3_600_000;
+    if (value > 0 && value < 1) return `${Math.round(value * 60)} min`;
+    return `${value.toLocaleString("pt-BR", { maximumFractionDigits: value < 10 ? 1 : 0 })} h`;
+  }
+
+  function humanHours(value) {
+    if (value == null || !Number.isFinite(Number(value))) return "—";
+    const h = Number(value);
+    if (h < 1) return `${Math.max(1, Math.round(h * 60))} min`;
+    if (h < 48) return `${h.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} h`;
+    return `${Math.round(h / 24)} dias`;
+  }
+
+  function dayDate(key) { const [y, m, d] = String(key).split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1); }
+  function dayShort(key) { return dayDate(key).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }); }
+  function dayLong(key) { return dayDate(key).toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "short" }); }
+  function untilLabel(ms) {
+    const diff = asNumber(ms) - Date.now();
+    if (diff <= 0) return `acabou ${relative(ms).toLowerCase()}`;
+    if (diff < DAY_MS) return `acaba em ${Math.max(1, Math.ceil(diff / 3_600_000))} h`;
+    const days = Math.round(diff / DAY_MS);
+    return days === 1 ? "acaba amanhã" : `acaba em ${days} dias`;
+  }
+
+  function shortDate(ms) { return asNumber(ms) > 0 ? new Date(asNumber(ms)).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "—"; }
+
+  /* Variação contra o período anterior, de mesmo tamanho. Com base pequena a
+     porcentagem engana (1 → 2 vira +100%): abaixo de 20 mostra a diferença. */
+  function deltaChip(current, previous, { goodWhenUp = true, format = count, minBase = 20, comparable = true } = {}) {
+    if (!comparable) return `<span class="delta is-flat" title="O período anterior começa antes de 01/09/2026, quando o uso passou a ser medido">sem base anterior</span>`;
+    const cur = asNumber(current), prev = asNumber(previous);
+    if (cur === prev) return `<span class="delta is-flat">igual ao período anterior</span>`;
+    const up = cur > prev;
+    const text = prev >= minBase ? `${Math.abs(Math.round((cur - prev) * 100 / prev))}%` : `${up ? "+" : "−"}${format(Math.abs(cur - prev))}`;
+    return `<span class="delta is-${up === goodWhenUp ? "good" : "bad"}" title="Período anterior: ${esc(format(prev))}">${icon(up ? "arrow-up" : "arrow-down")}${esc(text)}<small>vs período anterior</small></span>`;
+  }
+
+  /* O uso só existe desde 01/09/2026: período anterior que começa antes disso
+     não é base de comparação, e dias antes do corte não são "zero uso". */
+  function previousComparable(data) {
+    const since = asNumber(data?.period?.usage_since_ms);
+    if (!since || !data?.period?.start) return true;
+    return dayDate(data.period.start).getTime() - asNumber(data.period.days) * DAY_MS >= since - DAY_MS;
+  }
+
+  /* Funil: a coorte começa no corte de uso; se o período anterior começa
+     antes dele, a comparação é parcial e não aparece. */
+  function growthComparable(g) { return !g?.period?.prev_cohort_partial; }
+  function cohortCopy(g) {
+    const start = g?.period?.cohort_start;
+    return start && start !== g.period.start ? `desde ${dayShort(start)}` : periodCopy();
+  }
+
+  function daysSinceUsage(data, daily) {
+    const since = asNumber(data?.period?.usage_since_ms);
+    if (!since) return daily;
+    const cut = new Date(since); cut.setHours(0, 0, 0, 0);
+    const kept = daily.filter((day) => dayDate(day.d).getTime() >= cut.getTime());
+    return kept.length ? kept : daily;
+  }
+
+  function sparkline(values) {
+    const list = (values || []).map((value) => asNumber(value));
+    if (list.length < 2 || list.every((value) => value === 0)) return "";
+    const maximum = Math.max(...list, 1);
+    const points = list.map((value, index) => `${(index * 100 / (list.length - 1)).toFixed(2)},${(31 - value * 27 / maximum).toFixed(2)}`);
+    return `<svg class="kpi-spark" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true"><path class="kpi-spark-area" d="M0,32 L${points.join(" L")} L100,32 Z"/><path class="kpi-spark-line" d="M${points.join(" L")}"/></svg>`;
+  }
+
+  function kpiTile({ label, value, delta = "", foot = "", spark = null, tone = "blue", iconName = "activity", hint = "" }) {
+    return `<article class="metric-card kpi-card metric-${tone}"${hint ? ` title="${esc(hint)}"` : ""}><div class="metric-head"><span class="metric-label">${esc(label)}</span><span class="metric-icon">${icon(iconName)}</span></div><div class="metric-value">${esc(value)}</div>${delta ? `<div class="kpi-delta">${delta}</div>` : ""}<div class="metric-foot">${foot}</div>${sparkline(spark)}</article>`;
+  }
+
+  function metricGate(name, label) {
+    if (state[name]) return "";
+    if (state.errors[name]) return errorState(state.errors[name], name);
+    return `<div class="metric-grid metric-grid--five">${Array(5).fill('<article class="metric-card skeleton"></article>').join("")}</div>${loadingState(label)}`;
+  }
+
+  /* Recarregar mantém o quadro anterior esmaecido, sem pular a página. */
+  function refreshingClass(...names) { return names.some((name) => state.loading[name] && state[name]) ? " is-refreshing" : ""; }
+
+  function panel(title, copy, body, actions = "", extraClass = "") {
+    return `<article class="panel${extraClass ? ` ${extraClass}` : ""}"><div class="panel-head"><div><h3 class="section-title">${esc(title)}</h3>${copy ? `<p class="section-copy">${esc(copy)}</p>` : ""}</div>${actions}</div>${body}</article>`;
+  }
+
+  function plainNotice(text, iconName = "check-circle") {
+    return `<div class="notice notice--plain">${icon(iconName)}<span>${esc(text)}</span></div>`;
+  }
+
+  /* Gráfico diário ------------------------------------------------------ */
+  const chartStore = new Map();
+
+  function niceStep(raw, integer) {
+    if (!(raw > 0)) return 1;
+    const exponent = 10 ** Math.floor(Math.log10(raw));
+    const fraction = raw / exponent;
+    const step = (fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10) * exponent;
+    return integer ? Math.max(1, Math.round(step)) : step;
+  }
+
+  /* Uma série vira área (tendência) ou colunas; várias séries viram colunas
+     empilhadas, sempre num eixo só. `extra` acrescenta linhas à dica sem
+     desenhar nada. A dica sai do mesmo dado guardado aqui. */
+  function timeChart(key, { days, series, kind = "area", format = count, axisFormat = format, extra = [], label = "", integer = true }) {
+    const n = days.length;
+    if (!n) return plainNotice("Sem dias no período.", "info");
+    const totals = days.map((_, index) => series.reduce((sum, item) => sum + asNumber(item.values[index]), 0));
+    const peak = Math.max(0, ...totals);
+    const step = niceStep(Math.max(peak, integer ? 1 : 0) / 3, integer);
+    const top = Math.max(step, Math.ceil(peak / step) * step);
+    const ticks = [];
+    for (let value = 0; value <= top + step / 2; value += step) ticks.push(value);
+    chartStore.set(key, { days, series, extra, format, kind, top });
+    const yPct = (value) => asNumber(value) * 100 / top;
+    const xPct = (index) => kind === "area" ? (n === 1 ? 50 : index * 100 / (n - 1)) : (index + 0.5) * 100 / n;
+    const every = Math.max(1, Math.ceil(n / 6));
+    const xIndexes = days.map((_, index) => index).filter((index) => (n - 1 - index) % every === 0);
+    const yWidth = Math.max(...ticks.map((tick) => String(axisFormat(tick)).length)) * 0.34 + 0.35;
+    let plot;
+    if (kind === "area") {
+      const color = series[0].color;
+      const points = series[0].values.map((value, index) => [xPct(index), 100 - yPct(value)]);
+      const line = points.map(([x, y], index) => `${index ? "L" : "M"}${x.toFixed(3)},${y.toFixed(3)}`).join(" ");
+      const last = points[points.length - 1];
+      plot = `<svg class="tchart-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path class="tchart-area" style="fill:${color}" d="${line} L${last[0]},100 L${points[0][0]},100 Z"/><path class="tchart-line" style="stroke:${color}" d="${line}"/></svg><span class="tchart-end" style="left:${last[0]}%;bottom:${100 - last[1]}%;background:${color}"></span>`;
+    } else {
+      plot = `<div class="tchart-cols">${days.map((_, index) => {
+        const total = totals[index];
+        const segments = series.filter((item) => asNumber(item.values[index]) > 0).map((item) => `<span style="flex-grow:${asNumber(item.values[index])};background:${item.color}"></span>`).join("");
+        return `<span class="tchart-col" data-i="${index}"><span class="tchart-bar" style="height:${total ? Math.max(1.5, yPct(total)) : 0}%">${segments}</span></span>`;
+      }).join("")}</div>`;
+    }
+    const legend = series.length > 1 ? `<div class="tchart-legend">${series.map((item) => `<span><i style="background:${item.color}"></i>${esc(item.name)}</span>`).join("")}</div>` : "";
+    return `<figure class="tchart" data-chart="${esc(key)}" tabindex="0" aria-label="${esc(label)}. Use as setas para percorrer os dias.">
+      <div class="tchart-y" style="width:${yWidth.toFixed(2)}rem" aria-hidden="true">${ticks.map((tick) => `<span style="bottom:${yPct(tick)}%">${esc(axisFormat(tick))}</span>`).join("")}</div>
+      <div class="tchart-plot">
+        <div class="tchart-grid" aria-hidden="true">${ticks.slice(1).map((tick) => `<span style="bottom:${yPct(tick)}%"></span>`).join("")}</div>
+        ${plot}
+        <span class="tchart-cross" hidden></span><span class="tchart-dot" hidden></span><div class="tchart-tip" hidden></div>
+      </div>
+      <div class="tchart-x" aria-hidden="true">${xIndexes.map((index) => `<span style="left:${xPct(index)}%">${esc(dayShort(days[index]))}</span>`).join("")}</div>
+      ${legend}
+    </figure>`;
+  }
+
+  function chartIndexAt(plot, clientX) {
+    const chart = chartStore.get(plot.closest(".tchart")?.dataset.chart);
+    if (!chart) return null;
+    const rect = plot.getBoundingClientRect();
+    const ratio = clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 0.9999);
+    const n = chart.days.length;
+    return chart.kind === "area" ? Math.round(ratio * (n - 1)) : Math.floor(ratio * n);
+  }
+
+  function showChartPoint(figure, index) {
+    const chart = chartStore.get(figure?.dataset.chart);
+    if (!chart || index == null) return;
+    const n = chart.days.length;
+    const i = clamp(index, 0, n - 1);
+    figure.dataset.index = String(i);
+    const plot = figure.querySelector(".tchart-plot");
+    const left = chart.kind === "area" ? (n === 1 ? 50 : i * 100 / (n - 1)) : (i + 0.5) * 100 / n;
+    const cross = plot.querySelector(".tchart-cross");
+    cross.hidden = false; cross.style.left = `${left}%`;
+    const dot = plot.querySelector(".tchart-dot");
+    if (chart.kind === "area") {
+      dot.hidden = false; dot.style.left = `${left}%`;
+      dot.style.bottom = `${asNumber(chart.series[0].values[i]) * 100 / chart.top}%`;
+      dot.style.background = chart.series[0].color;
+    } else dot.hidden = true;
+    plot.querySelector(".tchart-col.is-hover")?.classList.remove("is-hover");
+    plot.querySelector(`.tchart-col[data-i="${i}"]`)?.classList.add("is-hover");
+    /* Rótulos vêm do próprio painel, mas a dica é montada com textContent. */
+    const tip = plot.querySelector(".tchart-tip");
+    const date = document.createElement("span");
+    date.className = "tchart-tip-date"; date.textContent = dayLong(chart.days[i]);
+    const rows = [...chart.series.map((item) => ({ ...item, format: item.format || chart.format })), ...chart.extra].map((item) => {
+      const row = document.createElement("span"); row.className = "tchart-tip-row";
+      const key = document.createElement("i"); key.className = item.color ? "" : "is-empty"; if (item.color) key.style.background = item.color;
+      const value = document.createElement("b"); value.textContent = (item.format || chart.format)(item.values[i]);
+      const name = document.createElement("small"); name.textContent = item.name;
+      row.append(key, value, name);
+      return row;
+    });
+    tip.replaceChildren(date, ...rows);
+    tip.hidden = false;
+    tip.style.left = `${left}%`;
+    tip.classList.toggle("is-left", left > 62);
+    tip.classList.toggle("is-right", left < 38);
+  }
+
+  function hideChartPoint(figure) {
+    if (!figure) return;
+    figure.querySelectorAll(".tchart-cross, .tchart-dot, .tchart-tip").forEach((node) => { node.hidden = true; });
+    figure.querySelector(".tchart-col.is-hover")?.classList.remove("is-hover");
+  }
+
+  /* Funil e etapas ------------------------------------------------------- */
+  function funnelView(funnel, { compact = false, showPrev = true } = {}) {
+    const start = asNumber(funnel[0]?.count);
+    const drops = funnel.slice(1).map((step, index) => Math.max(0, asNumber(funnel[index].count) - asNumber(step.count)));
+    const biggest = Math.max(0, ...drops);
+    const worst = biggest > 0 ? drops.indexOf(biggest) : -1;
+    const rows = funnel.map((step, index) => {
+      const value = asNumber(step.count);
+      const width = start ? Math.max(value ? 1.5 : 0, value * 100 / start) : 0;
+      const drop = drops[index] || 0;
+      const dropNote = !compact && drop > 0
+        ? `<div class="funnel-drop${index === worst ? " is-worst" : ""}">${icon("arrow-down")}<span><strong>${count(drop)} ${drop === 1 ? "parou" : "pararam"} aqui.</strong> ${esc(STAGE_DROP[index])}</span></div>` : "";
+      const prev = !compact && showPrev && step.prev != null ? `<small class="funnel-prev" title="Contas criadas no período anterior">antes: ${count(step.prev)}</small>` : "";
+      return `<li class="funnel-step${index === worst + 1 && worst >= 0 ? " is-after-worst" : ""}"><div class="funnel-step-head"><span class="funnel-step-name"><span class="funnel-index">${index + 1}</span>${esc(compact ? STAGES[index].short : STAGES[index].label)}</span><span class="funnel-step-value">${prev}<strong>${count(value)}</strong><small>${start ? pct(value, start) : 0}%</small></span></div><div class="funnel-track"><span style="width:${width}%"></span></div>${dropNote}</li>`;
+    }).join("");
+    const worstLine = compact && worst >= 0
+      ? `<div class="funnel-drop is-worst">${icon("alert")}<span><strong>Maior perda: ${esc(STAGES[worst].short)} → ${esc(STAGES[worst + 1].short)}</strong> (${count(biggest)} ${biggest === 1 ? "conta" : "contas"}). ${esc(STAGE_DROP[worst])}</span></div>` : "";
+    return `<ol class="funnel${compact ? " funnel--compact" : ""}">${rows}</ol>${worstLine}`;
+  }
+
+  function stageProgress(stage) {
+    const current = STAGES[clamp(asNumber(stage), 0, STAGES.length - 1)];
+    return `<span class="stage" title="${esc(current.label)}"><span class="stage-dots" aria-hidden="true">${STAGES.map((item) => `<i class="${item.key <= current.key ? "is-on" : ""}"></i>`).join("")}</span><span class="stage-label">${esc(current.label)}</span></span>`;
+  }
+
+  function matchesStage(row, filter) {
+    if (filter === "all") return true;
+    if (filter === "0-1") return asNumber(row.stage) <= 1;
+    return asNumber(row.stage) === Number(filter);
+  }
+
+  /* Pessoas: identidade e as duas ações que importam (falar e abrir). */
+  function personCell(row) {
+    const title = row.name || row.email || "Conta sem nome";
+    const sub = row.name ? row.email : (row.user_id ? `${String(row.user_id).slice(0, 8)}…` : "");
+    return `<span class="cell-user"><span class="avatar">${esc(initials(row.name, row.email))}</span><span class="user-identity-copy"><span class="cell-primary">${esc(title)}</span>${sub ? `<span class="cell-secondary">${esc(sub)}</span>` : ""}</span></span>`;
+  }
+
+  function contactActions(row) {
+    const phone = onlyDigits(row.phone);
+    const whatsapp = phone.length >= 10
+      ? `<a class="icon-button icon-button--sm" href="https://wa.me/${phone}" target="_blank" rel="noopener" title="Conversar no WhatsApp" aria-label="Conversar no WhatsApp com ${esc(row.name || row.email || "a conta")}">${icon("phone")}</a>` : "";
+    const open = row.user_id ? `<button class="icon-button icon-button--sm" type="button" data-open-user-id="${esc(row.user_id)}" title="Abrir conta" aria-label="Abrir a conta de ${esc(row.name || row.email || "usuário")}">${icon("chevron-right")}</button>` : "";
+    return `<span class="row-actions">${whatsapp}${open}</span>`;
+  }
+
+  function peopleList(rows, meta, empty, limit = 8) {
+    if (!rows.length) return plainNotice(empty);
+    const visible = rows.slice(0, limit);
+    return `<div class="people-list">${visible.map((row) => `<div class="people-row">${personCell(row)}<span class="people-meta">${meta(row)}</span>${contactActions(row)}</div>`).join("")}</div>${rows.length > limit ? `<p class="chart-caption">E mais ${count(rows.length - limit)}.</p>` : ""}`;
+  }
+
+  function openUserById(userId) {
+    const find = () => state.accounts.find((item) => item.userId === userId);
+    const account = find();
+    if (account) return openUser(account.key);
+    if (!state.devices || state.loading.devices) {
+      return loadDevices({ quiet: true }).then(() => { const again = find(); if (again) openUser(again.key); else toast("Conta não encontrada", "error", "Ela pode ter sido excluída."); });
+    }
+    toast("Conta não encontrada", "error", "Ela pode ter sido excluída.");
+  }
+
   /* Visão geral ---------------------------------------------------------- */
+  function attentionItems() {
+    const g = state.growth, s = state.sales, a = state.adoption;
+    const items = [];
+    const add = (value, tone, iconName, title, copy, nav, stage = "") => { if (asNumber(value) > 0) items.push({ value: asNumber(value), tone, iconName, title, copy, nav, stage }); };
+    if (state.health) add(normalizedHealthServices().filter((service) => !service.ok || service.zombie).length, "red", "server", "Serviços com problema", "Algo da infraestrutura não está respondendo", "services");
+    if (s) {
+      /* Assinatura sem conta vinculada não tem com quem falar: fica só na lista. */
+      add((s.subscriptions || []).filter((row) => row.user_id && row.state === "canceled" && asNumber(row.expiry_ms) > Date.now()).length, "red", "alert", "Assinaturas que não vão renovar", "Desligaram a renovação na Google Play", "sales");
+      add((s.trials_ending || []).length, "yellow", "clock", "Testes acabando em até 7 dias", "Bom momento para oferecer um plano", "sales");
+      add(s.kpis?.pix_pending_users, "yellow", "wallet", "Pix gerado e não pago", `Começaram a compra e não concluíram, ${periodCopy()}`, "sales");
+      add((s.trials_lost || []).filter((row) => !row.was_customer).length, "blue", "key", "Teste acabou e não assinou", "Nos últimos 30 dias", "sales");
+    }
+    if (g) {
+      const accounts = g.accounts || [];
+      add(accounts.filter((row) => row.stage === 2).length, "red", "shield", "Confirmaram e não ligaram a leitura", `Travaram na permissão de acessibilidade, ${cohortCopy(g)}`, "growth", "2");
+      add(accounts.filter((row) => row.stage <= 1 && Date.now() - asNumber(row.created_ms) > DAY_MS).length, "yellow", "phone", "Pararam antes de confirmar o telefone", `Contas novas ${cohortCopy(g)}`, "growth", "0-1");
+    }
+    if (a) {
+      add((a.silent || []).length, "red", "bug", "Monitoram e nada é lido", "2 h ou mais de leitura na semana sem nenhuma solicitação", "adoption");
+      add((a.stopped || []).length, "yellow", "activity", "Pararam de usar", "Usavam há 1 a 3 semanas e sumiram nos últimos 7 dias", "adoption");
+      add((a.versions?.outdated || []).length, "blue", "package", "Usando versão antiga do app", "Ativos nos últimos 14 dias", "adoption");
+    }
+    add((state.diagnostics || []).filter((report) => report.status === "new").length, "purple", "bug", "Diagnósticos para revisar", "Relatos técnicos enviados pelo app", "diagnostics");
+    return items.sort((x, y) => TONE_RANK[x.tone] - TONE_RANK[y.tone]);
+  }
+
+  function renderAttentionPanel() {
+    const waiting = ["growth", "sales", "adoption"].some((name) => !state[name] && state.loading[name]);
+    const items = attentionItems();
+    const body = items.length
+      ? `<div class="attention-list">${items.map((item) => `<button class="attention-item" type="button" data-nav="${item.nav}"${item.stage ? ` data-stage="${item.stage}"` : ""}><span class="attention-icon is-${item.tone}">${icon(item.iconName)}</span><span class="attention-copy"><strong>${esc(item.title)}</strong><small>${esc(item.copy)}</small></span><span class="attention-count">${count(item.value)}</span>${icon("chevron-right")}</button>`).join("")}</div>`
+      : waiting ? `<div class="skeleton" style="min-height:12rem;border-radius:var(--radius)"></div>` : plainNotice("Nada pedindo ação agora. Bom sinal.");
+    return panel("Precisa de atenção", "O que pede uma ação sua, do mais urgente ao menos", body);
+  }
+
   function renderOverview() {
-    const accounts = realAccounts();
-    const stats = state.statistics || {};
-    const diagnostics = state.diagnostics || [];
-    const online = accounts.filter((a) => isOnline(a.lastSeen)).length;
-    const activeLicenses = accounts.filter((a) => ["active", "expiring", "lifetime"].includes(licenseState(a.expiry, a.lifetime).key)).length;
-    const expiring = accounts.filter((a) => licenseState(a.expiry, a.lifetime).key === "expiring").length;
-    const newDiagnostics = diagnostics.filter((d) => d.status === "new").length;
-    const activeWeek = asNumber(stats.accounts?.active_week);
-    const readWeek = asNumber(stats.funnel?.read_week);
-    const finishedWeek = asNumber(stats.funnel?.finished_week);
-    const conversion = pct(finishedWeek, readWeek);
-
-    const header = pageHeading(
-      "Central de operação",
-      "Veja a situação da base, as prioridades abertas e os sinais mais importantes do produto.",
-      `<button class="button button--secondary" data-nav="users">${icon("search")} Buscar conta</button><button class="button button--primary" data-nav="broadcast">${icon("send")} Novo comunicado</button>`
-    );
-
-    if (!state.devices && state.loading.devices) return header + `<div class="metric-grid">${Array(4).fill('<article class="metric-card skeleton"></article>').join("")}</div>${loadingState()}`;
-    if (state.errors.devices && !state.devices) return header + errorState(state.errors.devices, "devices");
-
-    const metrics = `<section class="metric-grid">
-      ${metricCard("Base real", count(accounts.length), `<strong>${count(activeWeek)}</strong> com corridas em 7 dias`, "blue", "users")}
-      ${metricCard("Online agora", count(online), `<strong>${count(uniqueDevices())}</strong> aparelhos vinculados`, "green", "activity")}
-      ${metricCard("Licenças ativas", count(activeLicenses), expiring ? `<strong>${count(expiring)}</strong> vencem em até 7 dias` : "Nenhuma vence em 7 dias", expiring ? "yellow" : "green", "key")}
-      ${metricCard("Diagnósticos novos", count(newDiagnostics), diagnostics.length ? `${count(diagnostics.length)} relatórios carregados` : "Sem relatos recentes", newDiagnostics ? "red" : "purple", "bug")}
+    const g = state.growth, s = state.sales, a = state.adoption;
+    const header = pageHeading("Resumo do negócio", `Quem chegou, quem usa e quem paga ${periodCopy()}, e o que precisa da sua atenção.`, periodControl());
+    if (!g && !s && !a) {
+      const failed = ["growth", "sales", "adoption"].find((name) => state.errors[name]);
+      if (failed) return header + errorState(state.errors[failed], failed);
+      return header + metricGate("growth", "Juntando os números do negócio…");
+    }
+    const funnel = g?.funnel || [];
+    const signups = asNumber(funnel[0]?.count), activated = asNumber(funnel[3]?.count);
+    const robots = asNumber(g?.robots?.period);
+    const ak = a?.kpis || {}, sk = s?.kpis || {};
+    const tiles = `<section class="metric-grid metric-grid--five kpi-grid">
+      ${kpiTile({ label: "Novos usuários", value: g ? count(signups) : "—", delta: g ? deltaChip(signups, funnel[0]?.prev, { comparable: growthComparable(g) }) : "", foot: robots ? `${count(robots)} ${robots === 1 ? "robô" : "robôs"} da Google fora da conta` : "Contas reais criadas", spark: g ? daysSinceUsage(g, g.daily || []).map((day) => day.signups) : null, tone: "blue", iconName: "users" })}
+      ${kpiTile({ label: "Ligaram a leitura", value: g ? count(activated) : "—", delta: g ? deltaChip(activated, funnel[3]?.prev, { comparable: growthComparable(g) }) : "", foot: g ? `<strong>${pct(activated, signups)}%</strong> dos novos usuários` : "", tone: "green", iconName: "shield" })}
+      ${kpiTile({ label: "Usuários ativos", value: a ? count(ak.active) : "—", delta: a ? deltaChip(ak.active, ak.active_prev, { comparable: previousComparable(a) }) : "", foot: a ? `<strong>${count(ak.dau)}</strong> hoje · ${count(ak.wau)} na semana` : "", spark: a ? daysSinceUsage(a, a.daily).map((day) => day.active) : null, tone: "purple", iconName: "heart-pulse", hint: "Contas com a leitura ligada em algum dia do período" })}
+      ${kpiTile({ label: "Assinantes", value: s ? count(sk.paying_now) : "—", foot: s ? (asNumber(sk.mrr_cents) ? `<strong>${brlCents(sk.mrr_cents)}</strong>/mês em renovação automática` : "Nenhuma assinatura renovando sozinha") : "", tone: "green", iconName: "key", hint: "Contas com acesso pago vigente agora (Play ou Pix)" })}
+      ${kpiTile({ label: "Receita", value: s ? compactBrl(sk.revenue_cents) : "—", delta: s ? deltaChip(sk.revenue_cents, sk.revenue_prev_cents, { format: compactBrl, minBase: 5000 }) : "", foot: s ? `${count(sk.payments)} ${asNumber(sk.payments) === 1 ? "pagamento" : "pagamentos"} · Play estimada + Pix` : "", spark: s?.daily?.map((day) => asNumber(day.play_cents) + asNumber(day.pix_cents)), tone: "yellow", iconName: "wallet" })}
     </section>`;
+    const funnelPanel = g ? panel("Funil dos novos usuários", `Contas criadas ${cohortCopy(g)}`, signups ? funnelView(funnel, { compact: true }) : plainNotice("Nenhuma conta real criada no período.", "info"), `<button class="text-button" type="button" data-nav="growth">Ver funil ${icon("arrow-right")}</button>`) : `<article class="panel skeleton" style="min-height:16rem"></article>`;
+    const aDaily = a ? daysSinceUsage(a, a.daily || []) : [];
+    const activeChart = a ? panel("Usuários ativos por dia", "Contas com a leitura ligada no dia", timeChart("overview-active", { days: aDaily.map((day) => day.d), series: [{ name: "usuários ativos", color: "var(--green)", values: aDaily.map((day) => day.active) }], extra: [{ name: "de leitura", values: aDaily.map((day) => day.hours_ms), format: hours }, { name: "corridas finalizadas", values: aDaily.map((day) => day.finished) }], label: "Usuários ativos por dia" }), `<button class="text-button" type="button" data-nav="adoption">Ver uso ${icon("arrow-right")}</button>`) : `<article class="panel skeleton" style="min-height:16rem"></article>`;
+    const gDaily = g ? daysSinceUsage(g, g.daily || []) : [];
+    const signupChart = g ? panel("Novos usuários por dia", "Contas reais, sem os robôs da Google", timeChart("overview-signups", { days: gDaily.map((day) => day.d), series: [{ name: "cadastros", color: "var(--blue)", values: gDaily.map((day) => day.signups) }], kind: "columns", extra: [{ name: "confirmaram o telefone", values: gDaily.map((day) => day.phone) }, { name: "ligaram a leitura", values: gDaily.map((day) => day.activated) }], label: "Novos usuários por dia" })) : `<article class="panel skeleton" style="min-height:16rem"></article>`;
+    const recent = g ? panel("Últimos cadastros", "Onde cada conta nova está no caminho", peopleList(g.accounts || [], (row) => `${stageProgress(row.stage)}<small>${esc(relative(row.created_ms))}</small>`, "Nenhum cadastro real no período.", 6), `<button class="text-button" type="button" data-nav="growth">Ver todos ${icon("arrow-right")}</button>`) : "";
+    return header + `<div class="biz-page${refreshingClass("growth", "sales", "adoption")}">${tiles}
+      <section class="dashboard-grid">${renderAttentionPanel()}${funnelPanel}</section>
+      <section class="content-grid">${activeChart}${signupChart}</section>
+      <section class="content-grid content-grid--wide-left">${recent}${renderServiceSummary()}</section></div>`;
+  }
 
-    return header + metrics + `<section class="dashboard-grid">
-      ${renderOverviewProduct(readWeek, finishedWeek, conversion, stats)}
-      ${renderAttention(accounts, diagnostics)}
-    </section>
-    <section class="dashboard-grid dashboard-grid--equal">
-      ${renderRecentDiagnostics(diagnostics)}
-      ${renderRecentAccounts(accounts)}
-    </section>
-    <section class="content-grid content-grid--wide-left">
-      ${renderServiceSummary()}
-      ${renderQuickActions()}
+  /* Novos usuários ------------------------------------------------------- */
+  function renderRetention(rows) {
+    const visible = (rows || []).filter((row) => asNumber(row.size) > 0);
+    if (!visible.length) return plainNotice("Ainda não há semanas com cadastros reais desde 01/09/2026.", "info");
+    const weeks = Math.max(...visible.map((row) => (row.active || []).length));
+    const head = `<tr><th>Semana do cadastro</th><th>Contas</th>${Array.from({ length: weeks }, (_, k) => `<th>${k === 0 ? "1ª sem." : `+${k}`}</th>`).join("")}</tr>`;
+    const body = visible.map((row) => `<tr><th scope="row">${esc(dayShort(row.week))}</th><td class="cohort-size">${count(row.size)}</td>${Array.from({ length: weeks }, (_, k) => {
+      const value = row.active?.[k];
+      if (value == null) return `<td class="cohort-cell is-future"></td>`;
+      const share = pct(value, row.size);
+      return `<td class="cohort-cell${share >= 70 ? " is-strong" : ""}" style="--share:${share}" title="${count(value)} de ${count(row.size)} usaram a leitura nesta semana">${share}%</td>`;
+    }).join("")}</tr>`).join("");
+    return `<div class="cohort-wrap"><table class="cohort-table"><thead>${head}</thead><tbody>${body}</tbody></table></div><p class="chart-caption">Cada linha é a turma que se cadastrou naquela semana; cada coluna, a fatia que usou a leitura na semana seguinte. Cor mais forte, mais gente usando.</p>`;
+  }
+
+  function renderGrowthAccounts(g) {
+    const rows = (g.accounts || []).filter((row) => matchesStage(row, state.growthStage));
+    const chips = STAGE_FILTERS.map(([value, label]) => {
+      const total = (g.accounts || []).filter((row) => matchesStage(row, value)).length;
+      return `<button class="filter-chip" type="button" data-growth-stage="${value}" aria-pressed="${state.growthStage === value}">${esc(label)} <span class="chip-count">${count(total)}</span></button>`;
+    }).join("");
+    const list = rows.length ? `<div class="biz-table">${rows.map((row) => `<div class="biz-row">
+        <span class="biz-cell biz-cell--person">${personCell(row)}</span>
+        <span class="biz-cell"><span class="biz-label">Cadastro</span><span class="cell-primary">${esc(relative(row.created_ms))}</span><span class="cell-secondary">${esc(dateTime(row.created_ms))} · ${esc(row.provider === "google" ? "Google" : "E-mail")}</span></span>
+        <span class="biz-cell biz-cell--stage"><span class="biz-label">Etapa</span>${stageProgress(row.stage)}</span>
+        <span class="biz-cell"><span class="biz-label">Uso da leitura</span><span class="cell-primary">${asNumber(row.mon_days) ? `${count(row.mon_days)} ${asNumber(row.mon_days) === 1 ? "dia" : "dias"} · ${esc(hours(row.mon_ms))}` : "Nunca ligou"}</span><span class="cell-secondary">${asNumber(row.rides) ? `${count(row.rides)} lidas · ${count(row.finished)} finalizadas` : "Nada lido"}</span></span>
+        <span class="biz-cell"><span class="biz-label">Último sinal</span><span class="cell-primary">${esc(relative(Math.max(asNumber(row.last_seen_ms), asNumber(row.mon_last_ms))))}</span><span class="cell-secondary">${row.app_name ? `app ${esc(row.app_name)}` : "versão não informada"}</span></span>
+        <span class="biz-cell biz-cell--actions">${contactActions(row)}</span>
+      </div>`).join("")}</div>` : plainNotice("Nenhuma conta nesta etapa.", "info");
+    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Contas novas ${esc(cohortCopy(g))}</h3><p class="section-copy">Filtre pela etapa em que pararam para saber com quem falar</p></div></div><div class="filter-row">${chips}</div>${list}</article>`;
+  }
+
+  function renderGrowth() {
+    const header = pageHeading("Novos usuários", "Quem chegou e até onde foi, do cadastro à assinatura. Robôs de revisão da Google ficam fora da conta.", periodControl());
+    const gate = metricGate("growth", "Montando o funil…");
+    if (gate) return header + gate;
+    const g = state.growth;
+    const funnel = g.funnel || [];
+    const daily = daysSinceUsage(g, g.daily || []);
+    const comparable = growthComparable(g);
+    const at = (index, field = "count") => asNumber(funnel[index]?.[field]);
+    const signups = at(0);
+    const robots = asNumber(g.robots?.period);
+    const cutNotice = g.period?.cohort_start && g.period.cohort_start !== g.period.start ? `<div class="notice">${icon("clock")}<span>O funil começa em <strong>${esc(dayShort(g.period.cohort_start))}</strong>: o uso de antes de 01/09/2026 não foi guardado, e uma conta mais antiga pareceria “não ligou a leitura” sem ter sido isso.</span></div>` : "";
+    const robotNotice = robots ? `<div class="notice notice--info">${icon("info")}<span><strong>${count(robots)} ${robots === 1 ? "conta de robô" : "contas de robôs"} de revisão da Google ${robots === 1 ? "ficou" : "ficaram"} fora destes números.</strong> A Google cria uma a cada versão enviada à Play (e-mail “nome.12345@gmail.com”, sempre num OnePlus8Pro) e elas nunca confirmam o telefone.</span></div>` : "";
+    const tiles = `<section class="metric-grid kpi-grid kpi-grid--four">
+      ${kpiTile({ label: "Cadastros", value: count(signups), delta: deltaChip(signups, at(0, "prev"), { comparable }), foot: `${count(g.totals?.accounts)} contas reais no total`, spark: daily.map((day) => day.signups), tone: "blue", iconName: "users" })}
+      ${kpiTile({ label: "Confirmaram o telefone", value: count(at(2)), delta: deltaChip(at(2), at(2, "prev"), { comparable }), foot: `<strong>${pct(at(2), signups)}%</strong> dos cadastros · ganham 30 dias`, tone: "purple", iconName: "phone" })}
+      ${kpiTile({ label: "Ligaram a leitura", value: count(at(3)), delta: deltaChip(at(3), at(3, "prev"), { comparable }), foot: `<strong>${pct(at(3), signups)}%</strong> dos cadastros · mediana ${esc(humanHours(g.timing?.activation_hours))}`, tone: "green", iconName: "shield" })}
+      ${kpiTile({ label: "Assinaram", value: count(at(6)), delta: deltaChip(at(6), at(6, "prev"), { comparable }), foot: `<strong>${pct(at(6), signups)}%</strong> dos cadastros do período`, tone: "yellow", iconName: "wallet" })}
     </section>`;
+    const providers = (g.providers || []);
+    const side = panel("Como chegam", "Entrada e tempo até cada passo", `<div class="bar-list">${providers.length ? providers.map((item) => bar(item.provider === "google" ? "Conta Google" : item.provider === "email" ? "E-mail e senha" : item.provider, item.count, signups, "var(--blue)", `${pct(item.count, signups)}%`)).join("") : plainNotice("Sem cadastros no período.", "info")}</div>
+      <div class="info-list" style="margin-top:1rem"><div class="info-row"><span>Até confirmar o telefone</span><span>${esc(humanHours(g.timing?.phone_hours))}</span></div><div class="info-row"><span>Até ligar a leitura</span><span>${esc(humanHours(g.timing?.activation_hours))}</span></div><div class="info-row"><span>Base real com telefone</span><span>${count(g.totals?.phone_ok)} de ${count(g.totals?.accounts)}</span></div><div class="info-row"><span>Base real que já ligou a leitura</span><span>${count(g.totals?.activated)}</span></div></div>
+      <p class="chart-caption">Tempos são a mediana das contas criadas no período.</p>`);
+    const chart = panel("Cadastros por dia", "Passe o mouse para ver quantos confirmaram e ligaram a leitura no dia", timeChart("growth-signups", { days: daily.map((day) => day.d), series: [{ name: "cadastros", color: "var(--blue)", values: daily.map((day) => day.signups) }], kind: "columns", extra: [{ name: "confirmaram o telefone", values: daily.map((day) => day.phone) }, { name: "ligaram a leitura", values: daily.map((day) => day.activated) }], label: "Cadastros por dia" }));
+    return header + `<div class="biz-page${refreshingClass("growth")}">${cutNotice}${robotNotice}${tiles}
+      <section class="content-grid content-grid--wide-left">${panel("Do cadastro à assinatura", `Contas criadas ${cohortCopy(g)} e a etapa mais avançada de cada uma`, signups ? funnelView(funnel, { showPrev: comparable }) : plainNotice("Nenhuma conta real criada no período.", "info"))}${side}</section>
+      <section class="content-grid">${chart}${panel("Retenção por semana de cadastro", "De quem chegou em cada semana, quantos seguiram usando", renderRetention(g.retention))}</section>
+      ${renderGrowthAccounts(g)}</div>`;
   }
 
-  function renderOverviewProduct(readWeek, finishedWeek, conversion, stats) {
-    const f = stats.funnel || {};
-    const verdict = readWeek < 20
-      ? "O volume dos últimos 7 dias ainda é pequeno para concluir uma tendência."
-      : asNumber(f.missed) > asNumber(f.finished)
-        ? "Solicitações perdidas superam as finalizadas no acumulado e merecem investigação."
-        : "O monitoramento registra mais finalizações do que perdas no acumulado.";
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Pulso do produto</h3><p class="section-copy">Solicitações registradas nos últimos 7 dias</p></div><button class="text-button" data-nav="analytics">Analisar tudo ${icon("arrow-right")}</button></div>
-      <div class="donut-layout"><div class="donut" style="--value:${conversion};--donut-color:var(--green)"><span class="donut-copy"><strong>${conversion}%</strong><small>finalizadas</small></span></div>
-      <div class="donut-legend"><div class="legend-row"><span class="legend-dot" style="--legend-color:var(--blue)"></span>Lidas<strong>${count(readWeek)}</strong></div><div class="legend-row"><span class="legend-dot" style="--legend-color:var(--green)"></span>Finalizadas<strong>${count(finishedWeek)}</strong></div><div class="legend-row"><span class="legend-dot" style="--legend-color:var(--red)"></span>Perdidas · total<strong>${count(f.missed)}</strong></div></div></div>
-      <div class="notice ${asNumber(f.missed) > asNumber(f.finished) ? "notice--warning" : "notice--info"}" style="margin:1.0625rem 0 0">${icon(asNumber(f.missed) > asNumber(f.finished) ? "alert" : "activity")}<span>${esc(verdict)}</span></div>
-    </article>`;
+  /* Vendas --------------------------------------------------------------- */
+  function customerStatus(row) {
+    if (!row.paying_until_ms) return pill("Venceu", "neutral");
+    if (row.source === "play" && row.renewing) return pill("Ativo · renova", "green");
+    if (row.source === "play") return pill(`Não renova · até ${shortDate(row.paying_until_ms)}`, "yellow");
+    return pill(`Pix · até ${shortDate(row.paying_until_ms)}`, "blue");
   }
 
-  function renderAttention(accounts, diagnostics) {
-    const expired = accounts.filter((a) => ["expired", "none"].includes(licenseState(a.expiry, a.lifetime).key)).length;
-    const expiring = accounts.filter((a) => licenseState(a.expiry, a.lifetime).key === "expiring").length;
-    const newReports = diagnostics.filter((d) => d.status === "new").length;
-    const orphans = state.accounts.filter((a) => a.isOrphan).length;
-    const services = Object.values(state.health?.services || {});
-    const serviceProblems = services.filter((s) => !s.ok || s.zombie).length;
-    const items = [
-      [serviceProblems, "Serviços com atenção", "Verifique a infraestrutura crítica", "server", "red", "services"],
-      [newReports, "Diagnósticos não revisados", "Relatos aguardando triagem", "bug", "red", "diagnostics"],
-      [expiring, "Licenças vencendo", "Prazo de até sete dias", "clock", "yellow", "users"],
-      [expired, "Sem acesso ativo", "Licenças expiradas ou ausentes", "key", "blue", "users"],
-      [orphans, "Aparelhos sem conta", "Registros legados para revisar", "device", "purple", "users"]
-    ].filter(([value]) => value > 0);
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Precisa de atenção</h3><p class="section-copy">Prioridades detectadas agora</p></div></div><div class="attention-list">${items.length ? items.map(([value, title, copy, iconName, tone, page]) => `<button class="attention-item" data-nav="${page}"><span class="attention-icon is-${tone}">${icon(iconName)}</span><span class="attention-copy"><strong>${esc(title)}</strong><small>${esc(copy)}</small></span><span class="attention-count">${count(value)}</span>${icon("chevron-right")}</button>`).join("") : `<div class="notice" style="margin:0">${icon("check-circle")}<span>Nenhuma prioridade crítica foi detectada.</span></div>`}</div></article>`;
+  function renderPlanMix(s) {
+    const plans = s.by_plan || [];
+    const total = plans.reduce((sum, item) => sum + asNumber(item.count), 0);
+    const tiers = ["essential", "pro", "ultra"].map((tier) => {
+      const rows = plans.filter((item) => item.tier === tier);
+      const value = rows.reduce((sum, item) => sum + asNumber(item.count), 0);
+      const detail = rows.map((item) => `${count(item.count)} ${SOURCE_LABELS[item.source] || item.source}`).join(" · ");
+      return bar(TIER_LABELS[tier], value, Math.max(1, total), "var(--green)", detail);
+    }).join("");
+    return panel("Assinantes por plano", "Acesso pago vigente agora", `<div class="bar-list">${tiers}</div><div class="info-list" style="margin-top:1rem"><div class="info-row"><span>Em teste gratuito agora</span><span>${count(s.kpis?.trials_active)}</span></div><div class="info-row"><span>Clientes desde o início</span><span>${count(s.kpis?.customers_total)}</span></div><div class="info-row"><span>Assinaturas da Play encerradas no período</span><span>${count(s.kpis?.ended_in_period)}</span></div></div>`);
   }
 
+  function renderSales() {
+    const header = pageHeading("Vendas", "Quanto entrou, quem paga hoje e quem está perto de decidir. A receita da Play é estimada pelo período pago de cada assinatura, antes dos 15% da Google.", periodControl());
+    const gate = metricGate("sales", "Somando pagamentos e assinaturas…");
+    if (gate) return header + gate;
+    const s = state.sales, k = s.kpis || {};
+    const daily = s.daily || [];
+    const conversion = asNumber(k.trials_ended) ? `${pct(k.trials_converted, k.trials_ended)}%` : "—";
+    const tiles = `<section class="metric-grid metric-grid--five kpi-grid">
+      ${kpiTile({ label: "Receita no período", value: brlCents(k.revenue_cents), delta: deltaChip(k.revenue_cents, k.revenue_prev_cents, { format: compactBrl, minBase: 5000 }), foot: `Play ${esc(compactBrl(k.play_cents))} · Pix ${esc(compactBrl(k.pix_cents))}`, spark: daily.map((day) => asNumber(day.play_cents) + asNumber(day.pix_cents)), tone: "green", iconName: "wallet" })}
+      ${kpiTile({ label: "Pagando agora", value: count(k.paying_now), foot: `<strong>${count(k.renewing)}</strong> com renovação automática`, tone: "blue", iconName: "key" })}
+      ${kpiTile({ label: "Receita recorrente", value: `${brlCents(k.mrr_cents)}`, foot: asNumber(k.mrr_cents) ? `por mês · ≈ ${esc(brlCents(asNumber(k.mrr_cents) * 0.85))} depois da Play` : "Nenhuma assinatura da Play renovando ainda", tone: "purple", iconName: "trending", hint: "Soma do preço das assinaturas da Play que vão renovar" })}
+      ${kpiTile({ label: "Novos clientes", value: count(k.new_customers), delta: deltaChip(k.new_customers, k.new_customers_prev), foot: "Primeiro pagamento no período", spark: daily.map((day) => day.new_customers), tone: "yellow", iconName: "users" })}
+      ${kpiTile({ label: "Conversão do teste", value: conversion, foot: `${count(k.trials_converted)} de ${count(k.trials_ended)} testes que acabaram ${esc(periodCopy())}`, tone: "green", iconName: "check-circle", hint: "Dos testes de 30 dias que terminaram no período, quantos pagaram" })}
+    </section>`;
+    const revenueChart = panel("Receita por dia", "Pagamentos pela Google Play (estimados) e por Pix", timeChart("sales-revenue", { days: daily.map((day) => day.d), series: [{ name: "Google Play", color: SERIES_COLORS.play, values: daily.map((day) => day.play_cents) }, { name: "Pix", color: SERIES_COLORS.pix, values: daily.map((day) => day.pix_cents) }], kind: "stack", format: brlCents, axisFormat: compactBrl, extra: [{ name: "novos clientes", values: daily.map((day) => day.new_customers), format: count }], label: "Receita por dia", integer: false }));
+    const trialMeta = (row) => `${pill(untilLabel(row.expiry_ms), asNumber(row.expiry_ms) > Date.now() ? "yellow" : "neutral")}<small>${asNumber(row.mon_days) ? `${count(row.mon_days)} ${asNumber(row.mon_days) === 1 ? "dia" : "dias"} de uso · ${count(row.finished)} corridas` : "nunca usou a leitura"}</small>`;
+    const ending = panel("Testes acabando em até 7 dias", "Quem usa bem é o melhor candidato a assinar", peopleList(s.trials_ending || [], trialMeta, "Nenhum teste termina nos próximos 7 dias."));
+    const lost = panel("Teste acabou e não assinou", "Últimos 30 dias · vale perguntar o motivo", peopleList((s.trials_lost || []), (row) => `${row.was_customer ? pill("ex-cliente", "purple") : ""}${trialMeta(row)}`, "Ninguém perdeu o acesso nos últimos 30 dias."));
+    const customers = s.customers || [];
+    const customerTable = panel("Clientes", "Quem já pagou alguma vez, do acesso mais longo ao vencido", customers.length ? `<div class="biz-table">${customers.map((row) => `<div class="biz-row biz-row--customers">
+        <span class="biz-cell biz-cell--person">${personCell(row)}</span>
+        <span class="biz-cell"><span class="biz-label">Plano</span><span class="cell-primary">${esc(TIER_LABELS[row.tier] || (row.paying_until_ms ? "—" : "Sem plano ativo"))}</span><span class="cell-secondary">${esc(SOURCE_LABELS[row.source] || "")}</span></span>
+        <span class="biz-cell"><span class="biz-label">Situação</span>${customerStatus(row)}</span>
+        <span class="biz-cell"><span class="biz-label">Cliente desde</span><span class="cell-primary">${esc(dateOnly(row.paid_first_ms))}</span><span class="cell-secondary">último uso ${esc(relative(row.mon_last_ms).toLowerCase())}</span></span>
+        <span class="biz-cell"><span class="biz-label">Total pago</span><span class="cell-metric">${esc(brlCents(row.paid_cents))}</span></span>
+        <span class="biz-cell biz-cell--actions">${contactActions(row)}</span>
+      </div>`).join("")}</div>` : plainNotice("Ninguém pagou ainda.", "info"));
+    const payments = panel("Pagamentos recentes", "Cobranças da Play (estimadas) e Pix confirmados", (s.recent_payments || []).length ? `<div class="activity-list">${s.recent_payments.slice(0, 10).map((row) => `<div class="activity-item"><span class="activity-icon" style="color:${SERIES_COLORS[row.source] || "var(--text-soft)"}">${icon(row.source === "play" ? "package" : "wallet")}</span><span class="activity-copy"><strong>${esc(row.email || "Aparelho sem conta")}</strong><small>${esc(row.plan || "")} · ${esc(SOURCE_LABELS[row.source] || row.source)}${row.source === "play" && !row.first ? " · renovação" : ""} · ${esc(dateTime(row.at_ms))}</small></span><span class="cell-metric">${esc(brlCents(row.amount_cents))}</span></div>`).join("")}</div>` : plainNotice("Nenhum pagamento registrado.", "info"));
+    const pending = (s.pix_pending || []);
+    const pendingPanel = panel("Pix gerado e não pago", `Compras iniciadas ${periodCopy()}`, pending.length ? `<div class="activity-list">${pending.slice(0, 10).map((row) => `<div class="activity-item"><span class="activity-icon">${icon("clock")}</span><span class="activity-copy"><strong>${esc(row.email || "Aparelho sem conta")}</strong><small>${esc(row.plan || "")} · ${esc(dateTime(row.created_ms))}${row.paid_later ? " · pagou depois" : ""}</small></span><span class="cell-metric">${esc(brlCents(row.amount_cents))}</span></div>`).join("")}</div>` : plainNotice("Nenhum Pix abandonado no período."));
+    const subs = s.subscriptions || [];
+    const subsPanel = subs.length ? panel("Assinaturas da Google Play", "Estado de cada assinatura, como a Google informou", `<div class="activity-list">${subs.map((row) => `<div class="activity-item"><span class="activity-icon" style="color:${SERIES_COLORS.play}">${icon("package")}</span><span class="activity-copy"><strong>${esc(row.email || "Sem conta vinculada")}</strong><small>${esc(row.plan)} · desde ${esc(dateOnly(row.created_ms))} · até ${esc(dateOnly(row.expiry_ms))}</small></span>${pill(({ active: "ativa", canceled: "cancelada", in_grace_period: "em carência", on_hold: "suspensa", paused: "pausada", expired: "expirada", revoked: "reembolsada", pending: "pendente" })[row.state] || row.state, row.state === "active" ? "green" : row.state === "canceled" ? "yellow" : "neutral")}</div>`).join("")}</div>`) : "";
+    return header + `<div class="biz-page${refreshingClass("sales")}">${tiles}
+      <section class="content-grid content-grid--wide-left">${revenueChart}${renderPlanMix(s)}</section>
+      <section class="content-grid">${ending}${lost}</section>
+      ${customerTable}
+      <section class="content-grid">${payments}${pendingPanel}</section>
+      ${subsPanel}</div>`;
+  }
+
+  /* Uso e adoção --------------------------------------------------------- */
+  const REQUEST_STATES = [
+    ["finished", "Finalizadas", "Corrida aceita e concluída com o app ligado"],
+    ["accepted", "Em andamento", "Aceitas e ainda sem fim registrado"],
+    ["canceled", "Canceladas", "Aceitas e canceladas depois"],
+    ["rejected", "Recusadas", "O motorista recusou pela janela do app"],
+    ["missed", "Não aceitas", "Lidas e deixadas passar (é o normal da maioria)"]
+  ];
+
+  function renderAdoption() {
+    const header = pageHeading("Uso e adoção", "Quantos motoristas usam a leitura, quanto usam e o que ela entrega. O uso é medido desde 01/09/2026.", periodControl());
+    const gate = metricGate("adoption", "Medindo o uso da leitura…");
+    if (gate) return header + gate;
+    const a = state.adoption, k = a.kpis || {}, daily = daysSinceUsage(state.adoption, state.adoption.daily || []);
+    const comparable = previousComparable(a);
+    const tiles = `<section class="metric-grid metric-grid--five kpi-grid">
+      ${kpiTile({ label: "Ativos hoje", value: count(k.dau), foot: `<strong>${count(k.wau)}</strong> em 7 dias · ${count(k.mau)} em 30 dias`, tone: "green", iconName: "heart-pulse", hint: "Contas com a leitura ligada hoje" })}
+      ${kpiTile({ label: "Ativos no período", value: count(k.active), delta: deltaChip(k.active, k.active_prev, { comparable }), foot: `média de <strong>${esc(String(k.avg_daily_active ?? 0).replace(".", ","))}</strong> por dia`, spark: daily.map((day) => day.active), tone: "blue", iconName: "users" })}
+      ${kpiTile({ label: "Horas de leitura", value: hours(k.hours_ms), delta: deltaChip(k.hours_ms, k.hours_prev_ms, { format: hours, minBase: 20 * 3_600_000, comparable }), foot: `${esc(hours(asNumber(k.hours_ms) / Math.max(1, asNumber(k.active))))} por usuário ativo`, spark: daily.map((day) => day.hours_ms), tone: "purple", iconName: "clock" })}
+      ${kpiTile({ label: "Corridas finalizadas", value: count(k.finished), delta: deltaChip(k.finished, k.finished_prev, { comparable }), foot: `de ${count(k.read)} solicitações lidas`, spark: daily.map((day) => day.finished), tone: "yellow", iconName: "check-circle" })}
+      ${kpiTile({ label: "Gain IA", value: count(k.ia_requests), delta: deltaChip(k.ia_requests, k.ia_requests_prev, { comparable }), foot: `<strong>${count(k.ia_users)}</strong> ${asNumber(k.ia_users) === 1 ? "pessoa usou" : "pessoas usaram"}`, spark: daily.map((day) => day.ia), tone: "purple", iconName: "message" })}
+    </section>`;
+    const activeChart = panel("Usuários ativos por dia", "Contas com a leitura ligada no dia", timeChart("adoption-active", { days: daily.map((day) => day.d), series: [{ name: "usuários ativos", color: "var(--green)", values: daily.map((day) => day.active) }], extra: [{ name: "de leitura", values: daily.map((day) => day.hours_ms), format: hours }, { name: "perguntas à Gain IA", values: daily.map((day) => day.ia) }], label: "Usuários ativos por dia" }));
+    const ridesChart = panel("Corridas finalizadas por dia", "Corridas que o app acompanhou do aceite ao fim", timeChart("adoption-finished", { days: daily.map((day) => day.d), series: [{ name: "corridas finalizadas", color: "var(--blue)", values: daily.map((day) => day.finished) }], kind: "columns", extra: [{ name: "solicitações lidas", values: daily.map((day) => day.read) }], label: "Corridas finalizadas por dia" }));
+    const platforms = a.platforms || [];
+    const platformMax = Math.max(1, ...platforms.map((item) => asNumber(item.read)));
+    const platformPanel = panel("Plataformas", `Solicitações lidas ${periodCopy()}`, platforms.length ? `<div class="bar-list">${platforms.map((item) => bar(item.name, item.read, platformMax, "var(--blue)", `${count(item.finished)} finalizadas · ${count(item.accounts)} ${asNumber(item.accounts) === 1 ? "conta" : "contas"}`)).join("")}</div>` : plainNotice("Nenhuma solicitação lida no período.", "info"));
+    const states = a.states || {};
+    const readTotal = REQUEST_STATES.reduce((sum, [key]) => sum + asNumber(states[key]), 0);
+    const statesPanel = panel("O que acontece com as solicitações", "Situação de cada solicitação lida no período", readTotal ? `<div class="bar-list">${REQUEST_STATES.map(([key, label, copy]) => `<div title="${esc(copy)}">${bar(label, states[key], readTotal, key === "finished" ? "var(--green)" : "var(--neutral-mark)", `${pct(states[key], readTotal)}%`)}</div>`).join("")}</div><p class="chart-caption">“Não aceitas” é a maioria por natureza: o motorista vê muitas ofertas e pega poucas.</p>` : plainNotice("Nenhuma solicitação lida no período.", "info"));
+    const stopped = panel("Pararam de usar", "Usavam há 1 a 3 semanas e não ligaram a leitura nos últimos 7 dias", peopleList(a.stopped || [], (row) => `${row.paying ? pill("pagante", "green") : ""}<small>último uso ${esc(relative(row.mon_last_ms).toLowerCase())} · ${count(row.mon_days)} ${asNumber(row.mon_days) === 1 ? "dia" : "dias"} de uso</small>`, "Ninguém parou de usar nas últimas semanas."));
+    const silent = panel("Monitoram e nada é lido", "2 h ou mais de leitura nos últimos 7 dias sem nenhuma solicitação", peopleList(a.silent || [], (row) => `<small>${esc(hours(row.week_ms))} na semana · app ${esc(row.app_name || "—")}</small>`, "Toda conta que monitorou leu solicitações. Bom sinal."));
+    const top = panel("Quem mais usa", `Corridas finalizadas com o app ${periodCopy()}`, peopleList(a.top || [], (row) => `${row.paying ? pill("pagante", "green") : ""}<small>${count(row.finished)} finalizadas · ${count(row.days)} ${asNumber(row.days) === 1 ? "dia" : "dias"} · ${esc(hours(row.hours_ms))}</small>`, "Ninguém usou a leitura no período.", 10));
+    const versions = a.versions || {};
+    const versionRows = versions.rows || [];
+    const versionMax = Math.max(1, ...versionRows.map((row) => asNumber(row.accounts)));
+    const versionPanel = panel("Versões em uso", "Contas vistas nos últimos 14 dias, pela versão mais nova de cada uma", versionRows.length ? `<div class="bar-list">${versionRows.map((row) => bar(`${row.name || "Desconhecida"}${row.code ? ` (${row.code})` : ""}${asNumber(row.code) === asNumber(versions.latest) ? " · atual" : ""}`, row.accounts, versionMax, asNumber(row.code) === asNumber(versions.latest) ? "var(--green)" : "var(--yellow)")).join("")}</div>${(versions.outdated || []).length ? `<p class="chart-caption">${count(versions.outdated.length)} ${versions.outdated.length === 1 ? "conta ativa está" : "contas ativas estão"} numa versão anterior à ${esc(String(versions.latest))}. Um comunicado pode lembrar de atualizar.</p>` : ""}` : plainNotice("Nenhuma conta informou versão recentemente.", "info"), `<button class="text-button" type="button" data-nav="broadcast">Comunicado ${icon("arrow-right")}</button>`);
+    const tiers = a.ia_tiers || [];
+    const tierMax = Math.max(1, ...tiers.map((row) => asNumber(row.requests)));
+    const iaPanel = panel("Gain IA por plano", `Perguntas respondidas ${periodCopy()}`, tiers.length ? `<div class="bar-list">${tiers.map((row) => bar(TIER_LABELS[row.tier] || row.tier, row.requests, tierMax, "var(--purple)", `${count(row.users)} ${asNumber(row.users) === 1 ? "pessoa" : "pessoas"}`)).join("")}</div>` : plainNotice("Ninguém usou a Gain IA no período.", "info"), `<button class="text-button" type="button" data-nav="assistant">Gain IA ${icon("arrow-right")}</button>`);
+    /* Telas, atalhos e janela de aceite são contadores acumulados no aparelho
+       (sem data): não respondem ao período, por isso ficam numa seção à parte. */
+    const stats = state.statistics;
+    const skeleton = `<article class="panel skeleton" style="min-height:12rem"></article>`;
+    const acceptance = stats ? renderAcceptanceWindow(stats.events || {}) : state.loading.statistics ? skeleton : "";
+    const inApp = stats ? `<section class="content-grid">${renderScreenAnalytics(stats.screens || [])}${renderEventAnalytics(stats.events || {})}</section>` : "";
+    return header + `<div class="biz-page${refreshingClass("adoption")}">${tiles}
+      <section class="content-grid">${activeChart}${ridesChart}</section>
+      <section class="content-grid">${platformPanel}${statesPanel}</section>
+      <section class="content-grid">${stopped}${silent}</section>
+      <section class="content-grid">${top}${versionPanel}</section>
+      <h3 class="section-divider">Dentro do app <small>Gain IA no período; telas, atalhos e janela de aceite acumulados desde a instalação</small></h3>
+      <section class="content-grid">${iaPanel}${acceptance}</section>
+      ${inApp}</div>`;
+  }
+
+  /* Saúde e diagnósticos (usados na visão geral e no menu) --------------- */
   function diagnosticTitle(report) {
     return report.error_message || report.capture_status || (report.error_code != null ? `Código ${report.error_code}` : "Relatório técnico");
   }
 
   function diagnosticStatus(status) {
     return ({ new: { label: "Novo", tone: "red" }, reviewed: { label: "Em análise", tone: "yellow" }, resolved: { label: "Resolvido", tone: "green" } })[status] || { label: status || "Desconhecido", tone: "neutral" };
-  }
-
-  function renderRecentDiagnostics(diagnostics) {
-    const list = [...diagnostics].sort((a, b) => asNumber(b.created_at_ms) - asNumber(a.created_at_ms)).slice(0, 5);
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Diagnósticos recentes</h3><p class="section-copy">Últimos relatos enviados pelo app</p></div><button class="text-button" data-nav="diagnostics">Ver fila ${icon("arrow-right")}</button></div><div class="activity-list">${list.length ? list.map((report) => { const status = diagnosticStatus(report.status); return `<button class="activity-item" data-open-diagnostic="${asNumber(report.id)}"><span class="activity-icon">${icon("bug")}</span><span class="activity-copy"><strong>${esc(diagnosticTitle(report))}</strong><small>${esc(report.user_email || "Sem e-mail")} · ${relative(report.created_at_ms)}</small></span>${pill(status.label, status.tone)}${icon("chevron-right")}</button>`; }).join("") : `<div class="notice" style="margin:0">${icon("check-circle")}<span>Nenhum diagnóstico recebido.</span></div>`}</div></article>`;
-  }
-
-  function renderRecentAccounts(accounts) {
-    const list = [...accounts].sort((a, b) => b.lastSeen - a.lastSeen).slice(0, 5);
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Atividade recente</h3><p class="section-copy">Contas vistas por último</p></div><button class="text-button" data-nav="users">Ver base ${icon("arrow-right")}</button></div><div class="activity-list">${list.map((account) => { const license = licenseState(account.expiry, account.lifetime); return `<button class="activity-item" data-open-user="${esc(account.key)}"><span class="avatar ${isOnline(account.lastSeen) ? "is-online" : ""}">${esc(initials(account.name, account.email))}</span><span class="activity-copy"><strong>${esc(account.name || account.email || "Conta sem nome")}</strong><small>${esc(account.email || "Sem e-mail")} · ${relative(account.lastSeen)}</small></span>${pill(license.label, license.tone)}${icon("chevron-right")}</button>`; }).join("")}</div></article>`;
   }
 
   function normalizedHealthServices() {
@@ -805,22 +1336,13 @@
     return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Saúde dos serviços</h3><p class="section-copy">Checagem real das dependências</p></div><button class="text-button" data-nav="services">Abrir status ${icon("arrow-right")}</button></div><div class="service-mini-list">${services.map((service) => `<div class="service-mini-item"><span class="status-dot ${service.ok && !service.zombie ? "status-dot--ok" : "status-dot--error"}"></span><span class="service-mini-copy"><strong>${esc(service.name)}</strong><small>${esc(serviceDescription(service))}</small></span><span class="latency">${service.latency_ms != null ? `${count(service.latency_ms)} ms` : "—"}</span></div>`).join("")}</div></article>`;
   }
 
-  function renderQuickActions() {
-    const actions = [
-      ["users", "users", "Consultar usuário", "Licença, uso e dispositivos"],
-      ["diagnostics", "bug", "Revisar diagnósticos", "Logs e ocorrências técnicas"],
-      ["whatsapp", "phone", "Gerenciar WhatsApp", "Conexão e verificações"],
-      ["broadcast", "send", "Enviar comunicado", "Números verificados ou lista"]
-    ];
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Ações rápidas</h3><p class="section-copy">Atalhos operacionais</p></div></div><div class="attention-list">${actions.map(([page, iconName, title, copy]) => `<button class="attention-item" data-nav="${page}"><span class="attention-icon is-blue">${icon(iconName)}</span><span class="attention-copy"><strong>${esc(title)}</strong><small>${esc(copy)}</small></span>${icon("chevron-right")}</button>`).join("")}</div></article>`;
-  }
-
   /* Usuários ------------------------------------------------------------- */
   function filteredAccounts() {
     const filter = state.userFilter;
     const query = filter.search.trim().toLocaleLowerCase("pt-BR");
     const list = state.accounts.filter((account) => {
-      if (filter.scope === "real" && (!account.userId || account.isInternal)) return false;
+      if (filter.scope === "real" && (!account.userId || account.isInternal || account.isRobot)) return false;
+      if (filter.scope === "robot" && !account.isRobot) return false;
       if (filter.scope === "internal" && !account.isInternal) return false;
       if (filter.scope === "orphan" && !account.isOrphan) return false;
       if (filter.scope === "tester" && !account.isTester) return false;
@@ -853,11 +1375,11 @@
     const online = accounts.filter((a) => isOnline(a.lastSeen)).length;
     const active = accounts.filter((a) => ["active", "expiring", "lifetime"].includes(licenseState(a.expiry, a.lifetime).key)).length;
     const expiring = accounts.filter((a) => licenseState(a.expiry, a.lifetime).key === "expiring").length;
-    const header = pageHeading("Contas e acessos", "A licença pertence à conta. Aparelhos compartilhados e registros internos são tratados sem distorcer a base real.") + versionReferenceNotice();
+    const header = pageHeading("Contas e acessos", "A licença pertence à conta. Aparelhos compartilhados e registros internos são tratados sem distorcer a base real.");
     if (!state.devices && state.loading.devices) return header + loadingState("Carregando contas e aparelhos…");
     if (state.errors.devices && !state.devices) return header + errorState(state.errors.devices, "devices");
-    return header + `<section class="metric-grid metric-grid--five">
-      ${metricCard("Contas reais", count(accounts.length), "Internas fora do total", "blue", "users")}
+    return header + `<section class="metric-grid metric-grid--five kpi-grid">
+      ${metricCard("Contas reais", count(accounts.length), `${count(state.accounts.filter((a) => a.isRobot).length)} robôs da Google e internas fora`, "blue", "users")}
       ${metricCard("Online agora", count(online), "Contato nos últimos 5 min", "green", "activity")}
       ${metricCard("Acesso ativo", count(active), `${pct(active, accounts.length)}% da base`, "green", "key")}
       ${metricCard("Vencendo", count(expiring), "Prazo de até 7 dias", expiring ? "yellow" : "blue", "clock")}
@@ -867,7 +1389,7 @@
 
   function renderUserToolbar() {
     const f = state.userFilter;
-    const chips = [["real", "Base real"], ["tester", "Testadores"], ["internal", "Internas"], ["orphan", "Sem conta"], ["all", "Todas"]];
+    const chips = [["real", "Base real"], ["robot", "Robôs da Google"], ["tester", "Enviam rastro"], ["internal", "Internas"], ["orphan", "Sem conta"], ["all", "Todas"]];
     return `<div class="toolbar"><label class="search-field">${icon("search")}<input id="user-search" type="search" value="${esc(f.search)}" placeholder="Buscar por nome, e-mail, telefone, UUID ou aparelho…" aria-label="Buscar usuários"></label>
       <select id="user-license-filter" class="toolbar-select" aria-label="Filtrar por licença"><option value="all">Todas as licenças</option><option value="active">Ativas</option><option value="expiring">Vencendo</option><option value="expired">Expiradas</option><option value="lifetime">Vitalícias</option><option value="none">Sem licença</option></select>
       <select id="user-activity-filter" class="toolbar-select" aria-label="Filtrar por atividade"><option value="all">Toda atividade</option><option value="online">Online agora</option><option value="week">Ativos em 7 dias</option><option value="month">Ativos em 30 dias</option><option value="inactive">Inativos +30 dias</option><option value="never">Nunca conectaram</option></select>
@@ -881,7 +1403,7 @@
     const sub = account.email || account.userId || account.devices[0]?.hash || "Sem identificação";
     const verified = verificationState(account) === "verified"
       ? `<span class="user-verified" role="img" aria-label="Telefone verificado" title="Telefone verificado">${icon("check-circle")}</span>` : "";
-    const roles = [account.isTester ? "Testador" : "", account.isInternal ? "Conta interna" : ""].filter(Boolean);
+    const roles = [account.isRobot ? "Robô de revisão da Google" : "", account.isTester ? "Envia rastro" : "", account.isInternal ? "Conta interna" : ""].filter(Boolean);
     return `<span class="cell-user user-identity"><span class="avatar ${isOnline(account.lastSeen) ? "is-online" : ""}">${esc(initials(account.name, account.email || account.devices[0]?.name))}</span><span class="user-identity-copy"><span class="user-name"><span class="cell-primary">${esc(name)}</span>${verified}</span><span class="cell-secondary">${esc(sub)}</span>${roles.length ? `<span class="user-meta">${roles.map((role) => `<span>${role}</span>`).join("")}</span>` : ""}</span></span>`;
   }
 
@@ -965,7 +1487,7 @@
     const tabs = account.isOrphan
       ? [["devices", "Aparelho"]]
       : [["summary", "Resumo"], ["activity", "Uso"], ["devices", "Dispositivos"], ["license", "Licença e dados"], ...(account.isTester ? [["trace", "Rastro"]] : [])];
-    const tags = `${pill(license.label, license.tone)}${account.isTester ? '<span class="tag">testador</span>' : ""}${account.isInternal ? '<span class="tag">conta interna</span>' : ""}${account.isOrphan ? '<span class="tag">sem conta</span>' : ""}`;
+    const tags = `${pill(license.label, license.tone)}${account.isRobot ? '<span class="tag">robô da Google</span>' : ""}${account.isTester ? '<span class="tag">envia rastro</span>' : ""}${account.isInternal ? '<span class="tag">conta interna</span>' : ""}${account.isOrphan ? '<span class="tag">sem conta</span>' : ""}`;
     els.detailContent.innerHTML = `<header class="detail-top"><button class="icon-button" data-close-detail aria-label="Fechar detalhe">${icon("x")}</button><div class="detail-top-copy"><span class="eyebrow">${account.isOrphan ? "Aparelho legado" : "Detalhe da conta"}</span><h2 id="detail-title">${esc(account.name || account.email || account.devices[0]?.name || "Sem identificação")}</h2></div><button class="icon-button" data-refresh-user="${esc(account.key)}" aria-label="Atualizar conta">${icon("refresh")}</button></header>
       <div class="detail-body"><section class="identity-card"><span class="avatar ${isOnline(account.lastSeen) ? "is-online" : ""}">${esc(initials(account.name, account.email || account.devices[0]?.name))}</span><div class="identity-copy"><h3>${esc(account.name || account.email || "Aparelho sem conta")}</h3><p>${esc(account.email || account.userId || account.devices[0]?.hash || "Sem identificação")}</p></div><div class="tags">${tags}</div></section>
       <div class="detail-tabs" role="tablist">${tabs.map(([value, label]) => `<button class="detail-tab" role="tab" data-user-tab="${value}" aria-selected="${state.detailTab === value}">${label}</button>`).join("")}</div>
@@ -1027,7 +1549,6 @@
         <div class="info-row"><span>Última atividade</span><span>${relative(account.lastSeen)} · ${dateTime(account.lastSeen)}</span></div>
         <div class="info-row"><span>Monitoramento acumulado</span><span>${duration(account.totalUsage)} em ${count(account.segments)} segmentos</span></div>
         <div class="info-row"><span>Diagnósticos enviados</span><span>${count(relatedDiagnostics.length)}</span></div>
-        ${account.isTester ? `<div class="info-row"><span>Programa de testes</span><span>${count(account.testerCheckins)} / 14 check-ins${account.testerCompleted ? " · concluído" : ""}</span></div>` : ""}
       </div></section>`;
   }
 
@@ -1342,40 +1863,9 @@
     ride_accepted: "Corrida aceita", ride_finished: "Corrida finalizada", ride_rejected: "Corrida recusada", ride_canceled: "Corrida cancelada", ride_missed: "Corrida perdida"
   };
 
-  function renderAnalytics() {
-    const s = state.statistics;
-    const header = pageHeading("Comportamento da base", "Os dados globais excluem contas internas. Janelas temporais só são usadas onde o backend registra timestamps de corridas.");
-    if (!s && state.loading.statistics) return header + loadingState("Agregando o comportamento da base…");
-    if (state.errors.statistics && !s) return header + errorState(state.errors.statistics, "statistics");
-    if (!s) return header + emptyState("Sem telemetria", "Nenhuma conta sincronizou dados de uso ainda.", "bar-chart");
-    const a = s.accounts || {}, f = s.funnel || {}, events = s.events || {};
-    const conversion = pct(f.finished, f.read);
-    const weekConversion = pct(f.finished_week, f.read_week);
-    return header + `<div class="notice notice--info">${icon("activity")}<span><strong>Leituras e finalizações</strong> vêm do histórico de corridas. Tempos de tela e eventos são acumulados e podem refletir a última sincronização de apenas um aparelho em contas multi-device.</span></div><section class="metric-grid metric-grid--five">
-      ${metricCard("Com dados", count(a.with_data), "Snapshots sincronizados", "blue", "database")}
-      ${metricCard("Com corridas", count(a.with_rides), `${pct(a.with_rides, a.with_data)}% com histórico`, "purple", "device")}
-      ${metricCard("Ativos em 7 dias", count(a.active_week), "Tiveram corrida registrada", "green", "activity")}
-      ${metricCard("Solicitações lidas", count(f.read), `${count(f.read_week)} nos últimos 7 dias`, "blue", "search")}
-      ${metricCard("Finalizadas", `${conversion}%`, `${weekConversion}% nos últimos 7 dias`, "green", "check-circle")}
-    </section><section class="content-grid content-grid--wide-left">${renderRequestStates(f)}${renderAcceptanceWindow(events)}</section><section class="content-grid">${renderSourceAnalytics(s.sources || [])}${renderScreenAnalytics(s.screens || [])}</section><section class="content-grid">${renderEventAnalytics(events)}${renderUserDistribution(s.per_user || [])}</section>`;
-  }
-
-  function renderRequestStates(f) {
-    const read = asNumber(f.read);
-    const states = [["Finalizadas", f.finished, "var(--green)"], ["Aceitas / em curso", f.accepted, "var(--blue)"], ["Recusadas", f.rejected, "var(--muted)"], ["Canceladas", f.canceled, "var(--yellow)"], ["Perdidas", f.missed, "var(--red)"]];
-    const verdict = read < 20 ? "Ainda há pouco volume para interpretar a distribuição." : asNumber(f.missed) > asNumber(f.finished) ? "As perdidas superam as finalizadas. Vale cruzar este sinal com diagnósticos e rastros de teste." : "Finalizadas superam as perdidas no histórico acumulado.";
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Estados das solicitações</h3><p class="section-copy">Situação atual das linhas do histórico — não é um funil sequencial</p></div></div><div class="funnel-list">${states.map(([label, value, color]) => `<div class="funnel-row"><span class="bar-label">${label}</span><div class="bar-track"><div class="bar-fill" style="width:${pct(value, read)}%;--bar-color:${color}"></div></div><span class="funnel-number">${count(value)} <small>${pct(value, read)}%</small></span></div>`).join("")}</div><div class="notice ${asNumber(f.missed) > asNumber(f.finished) ? "notice--warning" : "notice--info"}" style="margin:1.0625rem 0 0">${icon("activity")}<span>${esc(verdict)}</span></div></article>`;
-  }
-
   function renderAcceptanceWindow(events) {
     const shown = asNumber(events.accept_shown), tapped = asNumber(events.accept_tapped), rate = pct(tapped, shown);
     return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Janela de aceite</h3><p class="section-copy">Interação medida desde a instrumentação</p></div></div>${shown ? `<div class="donut-layout"><div class="donut" style="--value:${rate};--donut-color:var(--purple)"><span class="donut-copy"><strong>${rate}%</strong><small>toques</small></span></div><div class="donut-legend"><div class="legend-row"><span class="legend-dot" style="--legend-color:var(--purple)"></span>Exibições<strong>${count(shown)}</strong></div><div class="legend-row"><span class="legend-dot" style="--legend-color:var(--green)"></span>Toques<strong>${count(tapped)}</strong></div><div class="legend-row"><span class="legend-dot" style="--legend-color:var(--muted)"></span>Dispensadas<strong>${count(events.accept_dismissed)}</strong></div><div class="legend-row"><span class="legend-dot" style="--legend-color:var(--yellow)"></span>Expiradas<strong>${count(events.accept_expired)}</strong></div></div></div>` : `<div class="notice"><span>Sem exibições medidas ainda. Isso é diferente de uma taxa de 0%.</span></div>`}</article>`;
-  }
-
-  function renderSourceAnalytics(sources) {
-    const list = [...sources].sort((a, b) => asNumber(b.read_count) - asNumber(a.read_count));
-    const maximum = Math.max(1, ...list.map((item) => asNumber(item.read_count)));
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Plataformas monitoradas</h3><p class="section-copy">Origem das solicitações persistidas</p></div></div>${list.length ? `<div class="bar-list">${list.map((item) => bar(item.name || "Desconhecida", item.read_count, maximum, "var(--purple)", `${pct(item.finished_count, item.read_count)}% finalizadas`)).join("")}</div>` : `<div class="notice"><span>Sem plataformas identificadas.</span></div>`}</article>`;
   }
 
   function renderScreenAnalytics(screens) {
@@ -1388,12 +1878,6 @@
     const list = Object.entries(events).filter(([, value]) => asNumber(value) > 0).sort((a, b) => asNumber(b[1]) - asNumber(a[1])).slice(0, 16);
     const maximum = Math.max(1, ...list.map(([, value]) => asNumber(value)));
     return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Interações e eventos</h3><p class="section-copy">Mistura ações explícitas e eventos automáticos do ciclo de corrida</p></div></div>${list.length ? `<div class="bar-list">${list.map(([name, value]) => bar(EVENT_LABELS[name] || name.replaceAll("_", " "), value, maximum, "var(--yellow)")).join("")}</div>` : `<div class="notice"><span>Sem eventos sincronizados.</span></div>`}</article>`;
-  }
-
-  function renderUserDistribution(users) {
-    const list = [...users].sort((a, b) => asNumber(b.read) - asNumber(a.read)).slice(0, 12);
-    const emails = new Map(state.accounts.map((account) => [account.userId, account.email]));
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Distribuição por conta</h3><p class="section-copy">Quem mais registra solicitações</p></div></div>${list.length ? `<div class="activity-list">${list.map((user) => `<div class="activity-item"><span class="avatar">${esc(initials("", emails.get(user.user_id) || user.user_id))}</span><span class="activity-copy"><strong>${esc(emails.get(user.user_id) || `${String(user.user_id).slice(0, 8)}…`)}</strong><small>${count(user.finished)} finalizadas · ${count(user.rejected)} recusadas</small></span><span class="cell-metric">${count(user.read)}</span><span class="cell-secondary"> · ${pct(user.finished, user.read)}%</span></div>`).join("")}</div>` : `<div class="notice"><span>Sem distribuição por conta.</span></div>`}</article>`;
   }
 
   /* Versões -------------------------------------------------------------- */
@@ -1446,12 +1930,6 @@
     }));
   }
 
-  function versionReferenceNotice() {
-    const reference = appVersionReference();
-    if (!reference.observed || state.errors.versions || state.loading.versions) return "";
-    return `<div class="notice notice--info">${icon("package")}<span>Versão de referência: <strong>${esc(reference.name || reference.code)}</strong>, a mais recente informada pelos aparelhos. O catálogo de releases ainda não registra essa versão.</span></div>`;
-  }
-
   function loadVersions(options = {}) {
     return loadResource("versions", () => rpc("admin_version_overview", {}), (result) => {
       if (result.status !== "ok") throw new Error("O resumo global de versões não está disponível.");
@@ -1493,32 +1971,6 @@
     return { release, devices, known, current, outdated, unknown, currentCode, groups: [...groups.values()].sort((a, b) => (b.code ?? -1) - (a.code ?? -1)) };
   }
 
-  function renderVersions() {
-    const header = pageHeading("Adoção de versões", "Comparação com o catálogo de releases e as versões informadas pelos aparelhos.") + versionReferenceNotice();
-    if (!state.versions && state.loading.versions) return header + loadingState("Consultando a distribuição instalada…");
-    if (state.errors.versions && !state.versions) return header + `<div class="notice notice--warning">${icon("alert")}<span><strong>O novo resumo global precisa estar publicado no Supabase.</strong><br>${esc(state.errors.versions)}</span></div>${errorState("Aplique a migração 20260827000000_admin_hub_overview.sql e tente novamente.", "versions")}`;
-    if (!state.versions) return header;
-    const view = versionOverview();
-    const adoption = pct(view.current.length, view.devices.length);
-    const release = view.release;
-    const maximum = Math.max(1, ...view.groups.map((group) => group.count));
-    const upToDate = accountsOnCurrentVersion();
-    const lateAccounts = new Map();
-    view.outdated.forEach((item) => {
-      // Aparelho atrasado de uma conta que já tem outro na versão atual: o
-      // aparelho conta como atrasado, a conta não.
-      if (item.user_id && upToDate.has(item.user_id)) return;
-      const key = item.user_id || item.device_hash;
-      const current = lateAccounts.get(key);
-      if (!current || asNumber(item.app_version_code) < asNumber(current.app_version_code)) lateAccounts.set(key, item);
-    });
-    const apkUrl = safeHttpUrl(release?.apk_url);
-    return header + `${release ? `<section class="hero-status"><span class="hero-status-icon">${icon("package")}</span><div class="hero-status-copy"><span class="eyebrow">Release publicada</span><h3>${esc(release.version_name)} · código ${count(release.version_code)}</h3><p>Publicada em ${dateTime(release.released_at_ms)}${release.file_size_bytes ? ` · ${bytes(release.file_size_bytes)}` : ""}${release.mandatory ? " · atualização obrigatória" : ""}</p></div><div class="hero-status-actions">${apkUrl ? `<a class="button button--secondary button--compact" href="${esc(apkUrl)}" target="_blank" rel="noopener">${icon("external")} Abrir APK</a>` : ""}</div></section>` : `<div class="notice notice--warning">${icon("alert")}<span>Nenhuma release foi encontrada no catálogo.</span></div>`}
-      <section class="metric-grid" style="margin-top:0.9375rem">${metricCard("Aparelhos reportados", count(view.devices.length), `${count(view.known.length)} com versão conhecida`, "blue", "device")}${metricCard("Na versão atual", `${adoption}%`, `${count(view.current.length)} aparelhos`, "green", "check-circle")}${metricCard("Atrasados", count(view.outdated.length), `${count(lateAccounts.size)} contas afetadas`, view.outdated.length ? "yellow" : "green", "alert")}${metricCard("Sem versão", count(view.unknown.length), "Build ainda não identificada", view.unknown.length ? "purple" : "blue", "package")}</section>
-      <section class="content-grid content-grid--wide-left"><article class="panel"><div class="panel-head"><div><h3 class="section-title">Distribuição instalada</h3><p class="section-copy">Contas internas não participam deste cálculo</p></div></div><div class="version-list">${view.groups.map((group) => `<div class="version-row"><span class="version-name">${esc(group.name)} ${group.current ? '<span class="tag" style="margin-left:0.3125rem">atual</span>' : ""}</span><div class="bar-track"><div class="bar-fill" style="width:${group.count * 100 / maximum}%;--bar-color:${group.current ? "var(--green)" : group.code == null ? "var(--muted)" : "var(--yellow)"}"></div></div><span class="version-number">${count(group.count)}</span><span class="version-number">${pct(group.count, view.devices.length)}%</span></div>`).join("") || '<div class="notice"><span>Sem dispositivos com versão reportada.</span></div>'}</div></article>
-      <article class="panel"><div class="panel-head"><div><h3 class="section-title">Contas atrasadas</h3><p class="section-copy">Nenhum aparelho da conta na versão atual</p></div></div><div class="activity-list">${[...lateAccounts.values()].sort((a, b) => asNumber(a.app_version_code) - asNumber(b.app_version_code)).slice(0, 12).map((item) => { const account = state.accounts.find((a) => a.userId === item.user_id); return `<button class="activity-item" ${account ? `data-open-user="${esc(account.key)}"` : ""}><span class="activity-icon">${icon("device")}</span><span class="activity-copy"><strong>${esc(item.user_email || item.device_name || "Sem identificação")}</strong><small>${esc(item.app_version_name || "desconhecida")} · ${relative(item.last_seen_ms)}</small></span><span class="tag">code ${count(item.app_version_code)}</span>${account ? icon("chevron-right") : ""}</button>`; }).join("") || '<div class="notice"><span>Todas as contas têm um aparelho na versão atual.</span></div>'}</div></article></section>`;
-  }
-
   /* Rastros de teste ----------------------------------------------------- */
   function loadTraces(options = {}) {
     return loadResource("traces", () => rpc("admin_tester_trace_index", {}), (result) => {
@@ -1528,14 +1980,14 @@
   }
 
   function renderTraces() {
-    const header = pageHeading("Rastros dos testadores", "Eventos operacionais costurados por conta para investigar leituras, decisões e ciclos de corrida.");
+    const header = pageHeading("Rastros das corridas", "Eventos da leitura costurados por conta, para investigar solicitações não lidas, decisões e ciclos de corrida.");
     if (!state.traces && state.loading.traces) return header + loadingState("Consultando rastros recentes…");
-    if (state.errors.traces && !state.traces) return header + `<div class="notice notice--info">${icon("shield")}<span>Este recurso depende da migração de rastros dos testadores e pode ainda não estar publicado.</span></div>${errorState(state.errors.traces, "traces")}`;
+    if (state.errors.traces && !state.traces) return header + `<div class="notice notice--info">${icon("shield")}<span>Não foi possível consultar o índice de rastros.</span></div>${errorState(state.errors.traces, "traces")}`;
     const query = state.traceFilter.trim().toLocaleLowerCase("pt-BR");
     const traces = (state.traces || []).filter((item) => !query || [item.user_email, item.user_id].filter(Boolean).join(" ").toLocaleLowerCase("pt-BR").includes(query)).sort((a, b) => asNumber(b.last_at_ms) - asNumber(a.last_at_ms));
     const totalBatches = (state.traces || []).reduce((sum, item) => sum + asNumber(item.batches), 0);
     const totalBytes = (state.traces || []).reduce((sum, item) => sum + asNumber(item.bytes), 0);
-    return header + `<div class="notice notice--info">${icon("shield")}<span>Somente participantes do programa de testes enviam este rastro. O servidor retém os lotes por 30 dias; o índice mostra atividade dos últimos 7 dias.</span></div><section class="metric-grid">${metricCard("Testadores com rastro", count((state.traces || []).length), "Atividade nos últimos 7 dias", "purple", "users")}${metricCard("Lotes recebidos", count(totalBatches), "Blocos costurados por horário", "blue", "database")}${metricCard("Volume recente", bytes(totalBytes), "Texto operacional recebido", "green", "terminal")}${metricCard("Última recepção", state.traces?.length ? relative(Math.max(...state.traces.map((item) => asNumber(item.last_at_ms)))) : "—", "Atualização sob demanda", "yellow", "clock")}</section><div class="trace-toolbar"><label class="search-field">${icon("search")}<input id="trace-search" type="search" value="${esc(state.traceFilter)}" placeholder="Buscar por e-mail ou UUID…"></label></div>${traces.length ? `<div id="trace-results" class="trace-index-list">${traces.map((item) => `<button class="trace-card" data-open-trace="${esc(item.user_id)}"><div class="trace-card-head"><span class="avatar">${esc(initials("", item.user_email || item.user_id))}</span><span class="trace-card-copy"><strong>${esc(item.user_email || "Sem e-mail")}</strong><small>${esc(item.user_id)}</small></span>${icon("chevron-right")}</div><div class="trace-stats"><span class="trace-stat"><strong>${count(item.batches)}</strong><small>lotes em 7 dias</small></span><span class="trace-stat"><strong>${bytes(item.bytes)}</strong><small>volume recebido</small></span></div><span class="cell-secondary" style="margin-top:0.625rem">Último lote ${relative(item.last_at_ms).toLowerCase()}</span></button>`).join("")}</div>` : emptyState("Nenhum rastro recente", "Não há lotes de testadores que correspondam à busca.", "terminal")}`;
+    return header + `<div class="notice notice--info">${icon("shield")}<span>Só as contas com “Enviar rastro das corridas” ligado enviam este rastro. O servidor guarda os lotes por 30 dias; o índice mostra os últimos 7 dias.</span></div><section class="metric-grid">${metricCard("Contas com rastro", count((state.traces || []).length), "Atividade nos últimos 7 dias", "purple", "users")}${metricCard("Lotes recebidos", count(totalBatches), "Blocos costurados por horário", "blue", "database")}${metricCard("Volume recente", bytes(totalBytes), "Texto operacional recebido", "green", "terminal")}${metricCard("Última recepção", state.traces?.length ? relative(Math.max(...state.traces.map((item) => asNumber(item.last_at_ms)))) : "—", "Atualização sob demanda", "yellow", "clock")}</section><div class="trace-toolbar"><label class="search-field">${icon("search")}<input id="trace-search" type="search" value="${esc(state.traceFilter)}" placeholder="Buscar por e-mail ou UUID…"></label></div>${traces.length ? `<div id="trace-results" class="trace-index-list">${traces.map((item) => `<button class="trace-card" data-open-trace="${esc(item.user_id)}"><div class="trace-card-head"><span class="avatar">${esc(initials("", item.user_email || item.user_id))}</span><span class="trace-card-copy"><strong>${esc(item.user_email || "Sem e-mail")}</strong><small>${esc(item.user_id)}</small></span>${icon("chevron-right")}</div><div class="trace-stats"><span class="trace-stat"><strong>${count(item.batches)}</strong><small>lotes em 7 dias</small></span><span class="trace-stat"><strong>${bytes(item.bytes)}</strong><small>volume recebido</small></span></div><span class="cell-secondary" style="margin-top:0.625rem">Último lote ${relative(item.last_at_ms).toLowerCase()}</span></button>`).join("")}</div>` : emptyState("Nenhum rastro recente", "Não há lotes que correspondam à busca.", "terminal")}`;
   }
 
   function openTrace(userId, hours = 24) {
@@ -1553,7 +2005,7 @@
   function renderTraceDetail(index, account) {
     const detail = state.detail;
     const trace = detail.data;
-    els.detailContent.innerHTML = `<header class="detail-top"><button class="icon-button" data-close-detail aria-label="Fechar detalhe">${icon("x")}</button><div class="detail-top-copy"><span class="eyebrow">Rastro de testador</span><h2 id="detail-title">${esc(index.user_email || account?.email || detail.userId)}</h2></div>${account ? `<button class="button button--secondary button--compact" data-open-user="${esc(account.key)}">Abrir conta</button>` : ""}</header><div class="detail-body"><div class="toolbar"><select id="trace-detail-hours" class="toolbar-select"><option value="6"${detail.hours === 6 ? " selected" : ""}>Últimas 6 horas</option><option value="24"${detail.hours === 24 ? " selected" : ""}>Últimas 24 horas</option><option value="72"${detail.hours === 72 ? " selected" : ""}>Últimas 72 horas</option><option value="168"${detail.hours === 168 ? " selected" : ""}>Últimos 7 dias</option></select><button class="button button--secondary button--compact" data-reload-trace="${esc(detail.userId)}">${icon("refresh")} Atualizar</button>${trace?.text ? `<button class="button button--secondary button--compact" data-copy-trace="detail">${icon("copy")} Copiar</button><button class="button button--secondary button--compact" data-download-trace="detail">${icon("download")} Baixar</button>` : ""}</div><div class="notice notice--info">${icon("shield")}<span>Este conteúdo pode conter informações operacionais sensíveis. Use apenas para investigação do programa de testes.</span></div>${detail.loading ? loadingState("Costurando os lotes em ordem cronológica…") : ""}${detail.error ? errorState(detail.error) : ""}${trace ? `<div class="detail-metrics"><div class="detail-metric"><small>Lotes</small><strong>${count(trace.batches)}</strong></div><div class="detail-metric"><small>Bytes descartados</small><strong>${bytes(trace.skipped_bytes)}</strong></div><div class="detail-metric"><small>Intervalo</small><strong>${count(detail.hours)}h</strong></div></div>${trace.text ? `<div class="log-box" style="max-height:calc(100dvh - 16.875rem)"><pre>${esc(trace.text)}</pre></div>` : emptyState("Sem eventos no intervalo", "Nenhum lote foi recebido neste período.", "terminal")}` : ""}</div>`;
+    els.detailContent.innerHTML = `<header class="detail-top"><button class="icon-button" data-close-detail aria-label="Fechar detalhe">${icon("x")}</button><div class="detail-top-copy"><span class="eyebrow">Rastro das corridas</span><h2 id="detail-title">${esc(index.user_email || account?.email || detail.userId)}</h2></div>${account ? `<button class="button button--secondary button--compact" data-open-user="${esc(account.key)}">Abrir conta</button>` : ""}</header><div class="detail-body"><div class="toolbar"><select id="trace-detail-hours" class="toolbar-select"><option value="6"${detail.hours === 6 ? " selected" : ""}>Últimas 6 horas</option><option value="24"${detail.hours === 24 ? " selected" : ""}>Últimas 24 horas</option><option value="72"${detail.hours === 72 ? " selected" : ""}>Últimas 72 horas</option><option value="168"${detail.hours === 168 ? " selected" : ""}>Últimos 7 dias</option></select><button class="button button--secondary button--compact" data-reload-trace="${esc(detail.userId)}">${icon("refresh")} Atualizar</button>${trace?.text ? `<button class="button button--secondary button--compact" data-copy-trace="detail">${icon("copy")} Copiar</button><button class="button button--secondary button--compact" data-download-trace="detail">${icon("download")} Baixar</button>` : ""}</div><div class="notice notice--info">${icon("shield")}<span>Este conteúdo pode conter informações sensíveis (endereços, passageiros). Use apenas para investigar a leitura.</span></div>${detail.loading ? loadingState("Costurando os lotes em ordem cronológica…") : ""}${detail.error ? errorState(detail.error) : ""}${trace ? `<div class="detail-metrics"><div class="detail-metric"><small>Lotes</small><strong>${count(trace.batches)}</strong></div><div class="detail-metric"><small>Bytes descartados</small><strong>${bytes(trace.skipped_bytes)}</strong></div><div class="detail-metric"><small>Intervalo</small><strong>${count(detail.hours)}h</strong></div></div>${trace.text ? `<div class="log-box" style="max-height:calc(100dvh - 16.875rem)"><pre>${esc(trace.text)}</pre></div>` : emptyState("Sem eventos no intervalo", "Nenhum lote foi recebido neste período.", "terminal")}` : ""}</div>`;
   }
 
   /* Serviços ------------------------------------------------------------- */
@@ -1869,7 +2321,7 @@
 
   const SEGMENTS = [
     ["all", "Todos os verificados"],
-    ["tester", "Testadores"],
+    ["tester", "Enviam rastro"],
     ["expiring", "Licença vence em até 7 dias"],
     ["expired", "Sem acesso ativo"],
     ["active", "Licença em dia"],
@@ -3611,7 +4063,7 @@
     const providerInput = state.page === "assistant" && state.ai.tab === "connection" ? $("ai-provider-key") : null;
     const providerFocused = providerInput && active === providerInput;
     const aiFocus = state.page === "assistant" && active?.matches("[data-ai-field]") ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
-    const renderers = { overview: renderOverview, users: renderUsers, diagnostics: renderDiagnostics, traces: renderTraces, analytics: renderAnalytics, versions: renderVersions, news: renderNews, assistant: renderAiAssistant, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
+    const renderers = { overview: renderOverview, growth: renderGrowth, sales: renderSales, adoption: renderAdoption, users: renderUsers, diagnostics: renderDiagnostics, traces: renderTraces, news: renderNews, assistant: renderAiAssistant, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
     els.page.innerHTML = renderers[state.page]?.() || "";
     if (providerInput && $("ai-provider-key")) {
       providerInput.disabled = state.ai.providerSaving;
@@ -3637,7 +4089,7 @@
   }
 
   function retryResource(resource) {
-    const loaders = { devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
+    const loaders = { growth: loadGrowth, sales: loadSales, adoption: loadAdoption, devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
     loaders[resource]?.();
   }
 
@@ -3650,7 +4102,13 @@
   els.page.addEventListener("click", (event) => {
     const target = event.target.closest("button, [data-nav], [data-action]");
     if (!target) return;
-    if (target.dataset.nav) return setPage(target.dataset.nav);
+    if (target.dataset.period) return setPeriod(Number(target.dataset.period));
+    if (target.dataset.growthStage) { state.growthStage = target.dataset.growthStage; return renderCurrentPage(); }
+    if (target.dataset.openUserId) return openUserById(target.dataset.openUserId);
+    if (target.dataset.nav) {
+      if (target.dataset.nav === "growth") state.growthStage = target.dataset.stage || "all";
+      return setPage(target.dataset.nav);
+    }
     if (target.dataset.retry) return retryResource(target.dataset.retry);
     if (target.dataset.aiTab) return setAiTab(target.dataset.aiTab, true);
     if (target.dataset.aiGo) { setAiTab(target.dataset.aiGo); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
@@ -3781,6 +4239,33 @@
     if (row && ["Enter", " "].includes(event.key)) { event.preventDefault(); row.click(); }
   });
 
+  /* Gráficos: a mira acompanha o ponteiro; com o foco, as setas percorrem
+     os dias. */
+  els.page.addEventListener("pointermove", (event) => {
+    const plot = event.target.closest?.(".tchart-plot");
+    if (plot) showChartPoint(plot.closest(".tchart"), chartIndexAt(plot, event.clientX));
+  });
+  els.page.addEventListener("pointerout", (event) => {
+    const plot = event.target.closest?.(".tchart-plot");
+    if (plot && !plot.contains(event.relatedTarget) && document.activeElement !== plot.closest(".tchart")) hideChartPoint(plot.closest(".tchart"));
+  });
+  els.page.addEventListener("focusin", (event) => {
+    if (!event.target.matches?.(".tchart")) return;
+    const chart = chartStore.get(event.target.dataset.chart);
+    if (chart) showChartPoint(event.target, chart.days.length - 1);
+  });
+  els.page.addEventListener("focusout", (event) => { if (event.target.matches?.(".tchart")) hideChartPoint(event.target); });
+  els.page.addEventListener("keydown", (event) => {
+    if (!event.target.matches?.(".tchart") || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const chart = chartStore.get(event.target.dataset.chart);
+    if (!chart) return;
+    const last = chart.days.length - 1;
+    const current = asNumber(event.target.dataset.index, last);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? last : current + (event.key === "ArrowRight" ? 1 : -1);
+    showChartPoint(event.target, clamp(next, 0, last));
+  });
+
   els.detailContent.addEventListener("click", (event) => {
     const target = event.target.closest("button");
     if (!target) return;
@@ -3817,7 +4302,7 @@
     if (target.dataset.downloadTrace) {
       const account = findAccount(state.detail?.key);
       const text = target.dataset.downloadTrace === "detail" ? state.detail?.data?.text : detailStore(account).trace?.text;
-      return downloadText(`gain-rastro-${account?.email || state.detail?.userId || "testador"}.txt`, text || "");
+      return downloadText(`gain-rastro-${account?.email || state.detail?.userId || "conta"}.txt`, text || "");
     }
   });
 

@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b1119">
-  <meta name="description" content="Hub administrativo do Gain Calculator para operação, monitoramento e gestão.">
-  <title>Gain Control — Hub administrativo</title>
+  <meta name="description" content="Painel do Gain Calculator: novos usuários, vendas, uso do app e operação.">
+  <title>Gain Control</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=20261005-assistente-ia-4">
+  <link rel="stylesheet" href="./styles.css?v=20261015-painel-negocio">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -76,14 +76,14 @@
         <span>Gain Calculator</span>
       </div>
       <div class="auth-message">
-        <span class="eyebrow eyebrow--light">Central de operação</span>
+        <span class="eyebrow eyebrow--light">Painel do negócio</span>
         <h1>O app inteiro,<br>sob uma visão.</h1>
-        <p>Uso, usuários, diagnósticos e serviços organizados para você identificar o que importa e agir rápido.</p>
+        <p>Quem chegou, quem usa, quem paga e o que precisa da sua atenção, em um lugar só.</p>
       </div>
       <div class="auth-features">
-        <div><span class="feature-icon"><svg><use href="#i-gauge"/></svg></span><span><strong>Monitoramento claro</strong><small>Indicadores operacionais sem ruído.</small></span></div>
-        <div><span class="feature-icon"><svg><use href="#i-users"/></svg></span><span><strong>Gestão centralizada</strong><small>Contas, licenças e dados em um lugar.</small></span></div>
-        <div><span class="feature-icon"><svg><use href="#i-heart-pulse"/></svg></span><span><strong>Saúde em tempo real</strong><small>Serviços e incidentes visíveis.</small></span></div>
+        <div><span class="feature-icon"><svg><use href="#i-trending"/></svg></span><span><strong>Crescimento</strong><small>Funil do cadastro à assinatura.</small></span></div>
+        <div><span class="feature-icon"><svg><use href="#i-wallet"/></svg></span><span><strong>Vendas</strong><small>Receita, assinantes e testes acabando.</small></span></div>
+        <div><span class="feature-icon"><svg><use href="#i-heart-pulse"/></svg></span><span><strong>Uso e saúde</strong><small>Quem usa, quem parou e o sistema.</small></span></div>
       </div>
       <span class="auth-orb auth-orb--one"></span>
       <span class="auth-orb auth-orb--two"></span>
@@ -97,7 +97,7 @@
         </div>
         <span class="eyebrow">Acesso restrito</span>
         <h2>Bem-vindo de volta</h2>
-        <p class="auth-copy">Entre com uma conta autorizada para acessar o hub administrativo.</p>
+        <p class="auth-copy">Entre com uma conta autorizada para acessar o painel.</p>
 
         <button id="google-login" class="button button--google" type="button">
           <svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true">
@@ -139,33 +139,37 @@
     <aside id="sidebar" class="sidebar" aria-label="Navegação principal">
       <div class="sidebar-brand">
         <span class="brand-mark">G</span>
-        <span class="brand-copy"><strong>Gain Control</strong><small>Hub administrativo</small></span>
+        <span class="brand-copy"><strong>Gain Control</strong><small>Painel do negócio</small></span>
         <button id="close-sidebar" class="icon-button sidebar-close" type="button" aria-label="Fechar menu"><svg class="icon"><use href="#i-x"/></svg></button>
       </div>
 
       <nav class="main-nav">
         <div class="nav-section">
-          <span class="nav-label">Visão</span>
+          <span class="nav-label">Painel</span>
           <button class="nav-item" type="button" data-page="overview"><svg class="icon"><use href="#i-layout"/></svg><span>Visão geral</span></button>
         </div>
         <div class="nav-section">
-          <span class="nav-label">Operação</span>
+          <span class="nav-label">Negócio</span>
+          <button class="nav-item" type="button" data-page="growth"><svg class="icon"><use href="#i-trending"/></svg><span>Novos usuários</span></button>
+          <button class="nav-item" type="button" data-page="sales"><svg class="icon"><use href="#i-wallet"/></svg><span>Vendas</span></button>
+          <button class="nav-item" type="button" data-page="adoption"><svg class="icon"><use href="#i-bar-chart"/></svg><span>Uso e adoção</span></button>
+        </div>
+        <div class="nav-section">
+          <span class="nav-label">Clientes</span>
           <button class="nav-item" type="button" data-page="users"><svg class="icon"><use href="#i-users"/></svg><span>Usuários</span><span id="nav-users-badge" class="nav-badge" hidden></span></button>
-          <button class="nav-item" type="button" data-page="diagnostics"><svg class="icon"><use href="#i-bug"/></svg><span>Diagnósticos</span><span id="nav-diagnostics-badge" class="nav-badge nav-badge--alert" hidden></span></button>
-          <button class="nav-item" type="button" data-page="traces"><svg class="icon"><use href="#i-terminal"/></svg><span>Rastros de teste</span></button>
+          <button class="nav-item" type="button" data-page="broadcast"><svg class="icon"><use href="#i-send"/></svg><span>Comunicados</span></button>
         </div>
         <div class="nav-section">
           <span class="nav-label">Produto</span>
-          <button class="nav-item" type="button" data-page="analytics"><svg class="icon"><use href="#i-bar-chart"/></svg><span>Uso e adoção</span></button>
-          <button class="nav-item" type="button" data-page="versions"><svg class="icon"><use href="#i-package"/></svg><span>Versões</span></button>
+          <button class="nav-item" type="button" data-page="assistant"><svg class="icon"><use href="#i-message"/></svg><span>Gain IA</span><span class="nav-badge nav-badge--ai">IA</span></button>
           <button class="nav-item" type="button" data-page="news"><svg class="icon"><use href="#i-sparkles"/></svg><span>Novidades</span></button>
-          <button class="nav-item" type="button" data-page="assistant"><svg class="icon"><use href="#i-message"/></svg><span>Assistente IA</span><span class="nav-badge nav-badge--ai">IA</span></button>
         </div>
         <div class="nav-section">
-          <span class="nav-label">Serviços</span>
+          <span class="nav-label">Sistema</span>
           <button class="nav-item" type="button" data-page="services"><svg class="icon"><use href="#i-server"/></svg><span>Status</span><span id="nav-services-status" class="nav-status-dot" hidden></span></button>
+          <button class="nav-item" type="button" data-page="diagnostics"><svg class="icon"><use href="#i-bug"/></svg><span>Diagnósticos</span><span id="nav-diagnostics-badge" class="nav-badge nav-badge--alert" hidden></span></button>
           <button class="nav-item" type="button" data-page="whatsapp"><svg class="icon"><use href="#i-phone"/></svg><span>WhatsApp</span></button>
-          <button class="nav-item" type="button" data-page="broadcast"><svg class="icon"><use href="#i-send"/></svg><span>Comunicados</span></button>
+          <button class="nav-item" type="button" data-page="traces"><svg class="icon"><use href="#i-terminal"/></svg><span>Rastros</span></button>
         </div>
       </nav>
 
@@ -187,7 +191,7 @@
       <header class="topbar">
         <button id="open-sidebar" class="icon-button mobile-menu" type="button" aria-label="Abrir menu"><svg class="icon"><use href="#i-menu"/></svg></button>
         <div class="topbar-title">
-          <span id="page-eyebrow" class="eyebrow">Visão</span>
+          <span id="page-eyebrow" class="eyebrow">Painel</span>
           <h1 id="page-title">Visão geral</h1>
         </div>
         <div class="topbar-actions">
@@ -223,6 +227,6 @@
 
   <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
-  <script src="./app.js?v=20261006-sessao-persistente" defer></script>
+  <script src="./app.js?v=20261015-painel-negocio" defer></script>
 </body>
 </html>

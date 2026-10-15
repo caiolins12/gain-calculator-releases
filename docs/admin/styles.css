@@ -1245,3 +1245,178 @@ dialog::backdrop { background: rgba(2,6,10,.72); backdrop-filter: blur(4px); }
 .ai-table td.is-error { color: var(--red); font-weight: 700; }
 .ai-table .table-sub { display: block; color: var(--muted); font-size: .75rem; font-weight: 400; margin-top: .125rem; }
 @media (max-width: 560px) { .ai-two-fields { grid-template-columns: 1fr; } }
+
+/* Painel de negócio (15/10/2026) ------------------------------------------
+   Visão geral, Novos usuários, Vendas e Uso e adoção. Gráficos em HTML +
+   SVG sem biblioteca: a área estica no eixo (preserveAspectRatio none) com
+   traço que não escala; colunas são caixas flex com 2px de respiro. */
+:root { --neutral-mark: #4d5e72; --tip-bg: #0c141d; }
+
+.segmented { display: inline-flex; flex: 0 0 auto; padding: 0.1875rem; border: 1px solid var(--line); border-radius: 0.75rem; background: var(--bg-soft); }
+.segmented button { min-height: 2.125rem; padding: 0 0.875rem; border: 0; border-radius: 0.5625rem; background: transparent; color: var(--muted); cursor: pointer; font-size: 0.625rem; font-weight: 700; white-space: nowrap; }
+.segmented button:hover { color: var(--text-soft); }
+.segmented button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); box-shadow: var(--shadow-soft); }
+.segmented button:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+.biz-page { transition: opacity .2s; }
+.biz-page.is-refreshing { opacity: .55; pointer-events: none; }
+
+.kpi-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.kpi-grid--four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.kpi-card { display: flex; flex-direction: column; min-height: 9.75rem; padding-bottom: 2.375rem; }
+.kpi-card .metric-value { margin-top: 0.875rem; font-size: clamp(1.25rem, 1.55vw, 1.875rem); white-space: nowrap; }
+.text-button { white-space: nowrap; }
+.kpi-delta { margin-top: 0.4375rem; }
+.kpi-card .metric-foot { position: relative; z-index: 1; flex-wrap: wrap; line-height: 1.45; }
+.kpi-spark { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 2rem; pointer-events: none; }
+.kpi-spark-line { fill: none; stroke: var(--metric-color, var(--blue)); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; opacity: .75; }
+.kpi-spark-area { fill: var(--metric-color, var(--blue)); opacity: .08; }
+
+.delta { display: inline-flex; align-items: center; gap: 0.25rem; min-height: 1.25rem; padding: 0 0.4375rem; border-radius: 999px; background: rgba(255,255,255,.04); color: var(--text-soft); font-size: 0.5rem; font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta .icon { width: 0.6875rem; height: 0.6875rem; }
+.delta small { margin-left: 0.125rem; color: var(--muted); font-weight: 500; }
+.delta.is-good { background: var(--green-soft); color: #78e3a8; }
+.delta.is-bad { background: var(--red-soft); color: #ff9da0; }
+.delta.is-flat { color: var(--muted); font-weight: 600; }
+
+.notice--plain { margin: 0; align-items: center; }
+.notice--plain .icon { margin-top: 0; color: var(--green); }
+.section-divider { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.25rem 0.75rem; margin: 1.75rem 0 0.875rem; font-size: 0.875rem; letter-spacing: -.02em; }
+.section-divider small { color: var(--muted); font-size: 0.5625rem; font-weight: 500; letter-spacing: 0; }
+.chip-count { margin-left: 0.25rem; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+.filter-chip[aria-pressed="true"] .chip-count { color: inherit; opacity: .8; }
+
+/* Gráfico diário */
+.tchart { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0.5rem; margin: 0; outline: none; --chart-h: 10.5rem; }
+.tchart:focus-visible { outline: 2px solid rgba(91,155,255,.55); outline-offset: 0.375rem; border-radius: 0.375rem; }
+.tchart-y { position: relative; height: var(--chart-h); }
+.tchart-y span { position: absolute; right: 0; transform: translateY(50%); color: var(--muted); font-size: 0.4375rem; font-variant-numeric: tabular-nums; line-height: 1; white-space: nowrap; }
+.tchart-plot { position: relative; height: var(--chart-h); border-bottom: 1px solid var(--line); cursor: crosshair; touch-action: pan-y; }
+.tchart-grid span { position: absolute; left: 0; right: 0; height: 1px; background: var(--line-soft); }
+.tchart-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.tchart-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.tchart-area { opacity: .1; }
+.tchart-end, .tchart-dot { position: absolute; z-index: 2; width: 0.5rem; height: 0.5rem; border-radius: 50%; transform: translate(-50%, 50%); box-shadow: 0 0 0 2px var(--surface); pointer-events: none; }
+.tchart-cols { position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 2px; }
+.tchart-col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.tchart-bar { width: 100%; max-width: 1.2rem; display: flex; flex-direction: column-reverse; gap: 2px; overflow: hidden; border-radius: 4px 4px 0 0; transition: filter .12s; }
+.tchart-bar > span { flex-basis: 0; min-height: 1px; }
+.tchart-col.is-hover .tchart-bar { filter: brightness(1.25); }
+.tchart-cross { position: absolute; z-index: 1; top: 0; bottom: 0; width: 1px; background: rgba(186,197,209,.32); pointer-events: none; }
+.tchart-tip { position: absolute; z-index: 3; top: 0.25rem; display: grid; gap: 0.25rem; min-width: 8.5rem; padding: 0.5625rem 0.6875rem; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 0.625rem; background: var(--tip-bg); box-shadow: var(--shadow); pointer-events: none; }
+.tchart-tip[hidden] { display: none; }
+.tchart-tip.is-left { transform: translateX(calc(-100% - 0.625rem)); }
+.tchart-tip.is-right { transform: translateX(0.625rem); }
+.tchart-tip-date { margin-bottom: 0.125rem; color: var(--muted); font-size: 0.4375rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.tchart-tip-row { display: flex; align-items: center; gap: 0.375rem; white-space: nowrap; }
+.tchart-tip-row i { width: 0.625rem; height: 2px; flex: 0 0 auto; border-radius: 2px; }
+.tchart-tip-row i.is-empty { background: transparent; }
+.tchart-tip-row b { color: var(--text); font-size: 0.5625rem; font-variant-numeric: tabular-nums; }
+.tchart-tip-row small { color: var(--muted); font-size: 0.5rem; }
+.tchart-x { grid-column: 2; position: relative; height: 1.25rem; }
+.tchart-x span { position: absolute; top: 0.375rem; transform: translateX(-50%); color: var(--muted); font-size: 0.4375rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tchart-legend { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.375rem 1rem; margin-top: 0.625rem; color: var(--text-soft); font-size: 0.5rem; }
+.tchart-legend span { display: inline-flex; align-items: center; gap: 0.375rem; }
+.tchart-legend i { width: 0.625rem; height: 0.625rem; border-radius: 0.1875rem; }
+
+/* Funil */
+.funnel { display: grid; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+.funnel-step { min-width: 0; }
+.funnel-step-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.3125rem; }
+.funnel-step-name { display: flex; align-items: center; gap: 0.5rem; min-width: 0; color: var(--text); font-size: 0.625rem; font-weight: 650; }
+.funnel-index { width: 1.125rem; height: 1.125rem; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; background: var(--surface-3); color: var(--muted); font-size: 0.4375rem; font-weight: 800; }
+.funnel-step-value { display: flex; align-items: baseline; gap: 0.4375rem; font-variant-numeric: tabular-nums; }
+.funnel-step-value strong { font-size: 0.75rem; }
+.funnel-step-value small { min-width: 2.125rem; color: var(--muted); font-size: 0.5rem; text-align: right; }
+.funnel-step-value .funnel-prev { min-width: 0; margin-right: 0.25rem; }
+.funnel-track { height: 0.5625rem; overflow: hidden; border-radius: 999px; background: var(--surface-3); }
+.funnel-track span { display: block; height: 100%; border-radius: inherit; background: var(--green); transition: width .35s ease; }
+.funnel-drop { display: flex; align-items: flex-start; gap: 0.4375rem; margin: 0.4375rem 0 0.125rem 1.625rem; color: var(--muted); font-size: 0.5rem; line-height: 1.5; }
+.funnel-drop .icon { flex: 0 0 auto; width: 0.6875rem; height: 0.6875rem; margin-top: 0.0625rem; }
+.funnel-drop strong { color: var(--text-soft); }
+.funnel-drop.is-worst { padding: 0.5rem 0.625rem; border: 1px solid rgba(245,200,75,.2); border-radius: 0.5625rem; background: var(--yellow-soft); color: #e3cf8c; }
+.funnel-drop.is-worst strong { color: var(--text); }
+.funnel-drop.is-worst .icon { color: var(--yellow); }
+.funnel--compact { gap: 0.4375rem; }
+.funnel--compact .funnel-step { display: grid; grid-template-columns: minmax(0, 6.5rem) minmax(0, 1fr); align-items: center; gap: 0.75rem; }
+.funnel--compact .funnel-step-head { display: contents; }
+.funnel--compact .funnel-step-name { grid-column: 1; grid-row: 1; color: var(--text-soft); font-size: 0.5625rem; font-weight: 600; }
+.funnel--compact .funnel-index { display: none; }
+.funnel--compact .funnel-track { grid-column: 2; grid-row: 1; height: 1.375rem; border-radius: 0.375rem; background: rgba(255,255,255,.03); }
+.funnel--compact .funnel-track span { border-radius: 0.375rem; background: rgba(52,212,123,.28); }
+.funnel--compact .funnel-step-value { grid-column: 2; grid-row: 1; justify-self: end; position: relative; z-index: 1; padding-right: 0.5rem; }
+.funnel--compact .funnel-step-value strong { font-size: 0.625rem; }
+.funnel--compact + .funnel-drop { margin: 0.875rem 0 0; }
+
+/* Etapa de cada conta */
+.stage { display: inline-flex; flex-direction: column; gap: 0.3125rem; min-width: 0; max-width: 100%; }
+.stage-dots { display: inline-flex; gap: 0.1875rem; }
+.stage-dots i { width: 0.75rem; height: 0.25rem; border-radius: 999px; background: var(--surface-3); }
+.stage-dots i.is-on { background: var(--green); }
+.stage-label { overflow: hidden; color: var(--text-soft); font-size: 0.5rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Pessoas e ações */
+.people-list { display: grid; }
+.people-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; align-items: center; gap: 0.75rem; min-width: 0; padding: 0.625rem 0.125rem; border-bottom: 1px solid var(--line-soft); }
+.people-row:last-child { border-bottom: 0; }
+.people-row .cell-user { min-width: 0; }
+.people-meta { display: flex; flex-direction: column; align-items: flex-start; gap: 0.3125rem; min-width: 0; }
+.people-meta small { max-width: 100%; overflow: hidden; color: var(--muted); font-size: 0.5rem; text-overflow: ellipsis; white-space: nowrap; }
+.people-meta .status-pill { min-height: 1.25rem; }
+.row-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.3125rem; }
+.icon-button--sm { width: 1.875rem; height: 1.875rem; border-radius: 0.5625rem; text-decoration: none; }
+.icon-button--sm .icon { width: 0.875rem; height: 0.875rem; }
+
+/* Tabela em grade (vira cartão no celular) */
+.biz-table { display: grid; }
+.biz-row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, .9fr) auto; align-items: center; gap: 0.875rem; padding: 0.75rem 0.25rem; border-bottom: 1px solid var(--line-soft); }
+.biz-row:last-child { border-bottom: 0; }
+.biz-row--customers { grid-template-columns: minmax(0, 1.6fr) minmax(0, .8fr) minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, .7fr) auto; }
+.biz-cell { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.biz-cell .status-pill { align-self: flex-start; }
+.biz-label { display: none; margin-bottom: 0.25rem; color: var(--muted); font-size: 0.4375rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+
+/* Retenção por semana */
+.cohort-wrap { overflow-x: auto; }
+.cohort-table { width: 100%; border-collapse: separate; border-spacing: 2px; font-size: 0.5rem; font-variant-numeric: tabular-nums; }
+.cohort-table th { padding: 0.3125rem 0.375rem; color: var(--muted); font-weight: 750; text-align: center; white-space: nowrap; }
+.cohort-table thead th:first-child, .cohort-table tbody th { text-align: left; }
+.cohort-table tbody th { color: var(--text-soft); font-weight: 650; }
+.cohort-size { padding: 0 0.375rem; color: var(--text-soft); text-align: center; }
+.cohort-cell { height: 1.875rem; min-width: 2.25rem; border-radius: 0.3125rem; background: color-mix(in srgb, var(--green) calc(8% + var(--share) * 0.8%), var(--surface-2)); color: var(--text); font-weight: 700; text-align: center; }
+.cohort-cell.is-strong { color: #062513; }
+.cohort-cell.is-future { background: transparent; }
+
+@media (max-width: 1275px) {
+  .biz-row, .biz-row--customers { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .biz-row > .biz-cell:nth-child(4), .biz-row > .biz-cell:nth-child(5) { display: none; }
+  .biz-row--customers > .biz-cell:nth-child(5) { display: flex; }
+  .biz-row--customers > .biz-cell:nth-child(2) { display: none; }
+}
+
+@media (max-width: 950px) {
+  .segmented { width: 100%; }
+  .segmented button { flex: 1; }
+  .people-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .people-row .people-meta { grid-column: 1 / -1; grid-row: 2; padding-left: 2.875rem; }
+  .biz-row, .biz-row--customers { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.625rem 0.875rem; padding: 0.875rem 0.125rem; }
+  .biz-row > .biz-cell, .biz-row--customers > .biz-cell { display: flex !important; }
+  .biz-cell--person { grid-row: 1; grid-column: 1 / -1; padding-right: 4.5rem; }
+  .biz-cell--actions { grid-column: 2; grid-row: 1; justify-self: end; align-self: start; }
+  .biz-label { display: block; }
+  .tchart { --chart-h: 9rem; }
+}
+
+@media (max-width: 1000px) {
+  .kpi-grid, .kpi-grid--four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpi-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+
+@media (max-width: 600px) {
+  .kpi-card { min-height: 8.75rem; padding-bottom: 2.125rem; }
+  .kpi-card .metric-value { font-size: 1.375rem; }
+  .attention-copy strong, .attention-copy small { white-space: normal; }
+  .delta small { display: none; }
+  .funnel--compact .funnel-step { grid-template-columns: minmax(0, 5.25rem) minmax(0, 1fr); }
+  .tchart-tip { min-width: 7.5rem; }
+}
