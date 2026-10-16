@@ -18,7 +18,7 @@
     news: { eyebrow: "Produto", title: "Novidades", description: "Cards e janelas da seção Novidades da tela inicial do app." },
     services: { eyebrow: "Sistema", title: "Status dos serviços", description: "Disponibilidade e latência das dependências críticas do app." },
     diagnostics: { eyebrow: "Sistema", title: "Diagnósticos", description: "Fila de incompatibilidades, ocorrências e logs enviados pelo app." },
-    whatsapp: { eyebrow: "Sistema", title: "WhatsApp", description: "Conexão da Evolution API e desempenho das verificações de telefone." },
+    whatsapp: { eyebrow: "Sistema", title: "WhatsApp", description: "API oficial da Meta, Evolution de reserva e desempenho das verificações de telefone." },
     traces: { eyebrow: "Sistema", title: "Rastros", description: "Rastro das corridas enviado pelos aparelhos com o envio ligado." },
     vitals: { eyebrow: "Sistema", title: "Travamentos", description: "Android vitals da Play: travamentos, ANRs e os avisos mandados por WhatsApp." }
   };
@@ -1327,22 +1327,40 @@
       { key: "edge", name: "Edge Function", icon: "activity", ...services.edge },
       { key: "db", name: "Banco de dados", icon: "database", ...services.db },
       { key: "auth", name: "Autenticação", icon: "shield", ...services.auth },
-      { key: "evolution", name: "Evolution API", icon: "phone", ...services.evolution }
+      ...(services.whatsapp_cloud ? [{ key: "whatsapp_cloud", name: "WhatsApp oficial (Meta)", icon: "message", ...services.whatsapp_cloud }] : []),
+      { key: "evolution", name: "Evolution API (reserva)", icon: "phone", ...services.evolution }
     ];
   }
 
   function serviceDescription(service) {
+    if (service.key === "whatsapp_cloud") {
+      if (service.configured === false) return "API oficial não configurada no servidor.";
+      if (service.error) return service.error;
+      if (!service.ok) return `O número oficial não pode enviar (${cloudSendLabel(service.can_send_message)}).`;
+      return cloudSendsCode(service) ? "Número pode enviar e o código de verificação sai por aqui." : `Número pode enviar, mas o modelo do código ${codeTemplatePhrase(service)}: o código depende do Evolution.`;
+    }
     if (service.zombie) return "Estado zumbi: reporta conexão, mas operações reais falham.";
     if (!service.ok) return service.error || "Serviço indisponível ou sem resposta.";
     if (service.key === "evolution") return service.reported_state_open ? "WhatsApp conectado e operações disponíveis." : "API responde, mas o WhatsApp está desconectado.";
     return "Operacional e respondendo normalmente.";
   }
 
+  // Verde, amarelo ou vermelho: a oficial de pé sem o modelo do código aprovado
+  // ainda funciona, mas o código não sai por ela.
+  function serviceTone(service) {
+    if (!service.ok || service.zombie) return "red";
+    return service.key === "whatsapp_cloud" && !cloudSendsCode(service) ? "yellow" : "green";
+  }
+
+  function serviceDot(service) {
+    return ({ green: "status-dot--ok", yellow: "status-dot--warn", red: "status-dot--error" })[serviceTone(service)];
+  }
+
   function renderServiceSummary() {
     if (state.loading.health && !state.health) return `<article class="panel skeleton" style="min-height:13.125rem"></article>`;
     if (state.errors.health && !state.health) return `<article class="panel"><div class="panel-head"><h3 class="section-title">Saúde dos serviços</h3></div><div class="notice notice--danger" style="margin:0">${icon("alert")}<span>${esc(state.errors.health)}</span></div></article>`;
     const services = normalizedHealthServices();
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Saúde dos serviços</h3><p class="section-copy">Checagem real das dependências</p></div><button class="text-button" data-nav="services">Abrir status ${icon("arrow-right")}</button></div><div class="service-mini-list">${services.map((service) => `<div class="service-mini-item"><span class="status-dot ${service.ok && !service.zombie ? "status-dot--ok" : "status-dot--error"}"></span><span class="service-mini-copy"><strong>${esc(service.name)}</strong><small>${esc(serviceDescription(service))}</small></span><span class="latency">${service.latency_ms != null ? `${count(service.latency_ms)} ms` : "—"}</span></div>`).join("")}</div></article>`;
+    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Saúde dos serviços</h3><p class="section-copy">Checagem real das dependências</p></div><button class="text-button" data-nav="services">Abrir status ${icon("arrow-right")}</button></div><div class="service-mini-list">${services.map((service) => `<div class="service-mini-item"><span class="status-dot ${serviceDot(service)}"></span><span class="service-mini-copy"><strong>${esc(service.name)}</strong><small>${esc(serviceDescription(service))}</small></span><span class="latency">${service.latency_ms != null ? `${count(service.latency_ms)} ms` : "—"}</span></div>`).join("")}</div></article>`;
   }
 
   /* Usuários ------------------------------------------------------------- */
@@ -2086,7 +2104,7 @@
 
   /* Serviços ------------------------------------------------------------- */
   function renderServices() {
-    const header = pageHeading("Infraestrutura crítica", "Checagens reais do banco, autenticação, Edge Function e Evolution API. Atualização automática a cada 15 segundos enquanto esta página estiver aberta.");
+    const header = pageHeading("Infraestrutura crítica", "Checagens reais do banco, autenticação, Edge Function, API oficial do WhatsApp e Evolution API. Atualização automática a cada 15 segundos enquanto esta página estiver aberta.");
     if (!state.health && state.loading.health) return header + loadingState("Executando checagens de saúde…");
     if (state.errors.health && !state.health) return header + errorState(state.errors.health, "health");
     if (!state.health) return header;
@@ -2095,7 +2113,7 @@
     const overallTitle = problems.length ? `${problems.length} ${problems.length === 1 ? "serviço exige" : "serviços exigem"} atenção` : "Todos os serviços estão operacionais";
     const overallCopy = problems.length ? "Abra os detalhes abaixo antes de executar ações dependentes da infraestrutura." : `Última checagem ${state.health.checked_at ? new Date(state.health.checked_at).toLocaleString("pt-BR") : "agora"}.`;
     return header + `<section class="hero-status" style="${problems.length ? "background:linear-gradient(130deg,rgba(255,107,112,.09),rgba(245,200,75,.035))" : ""}"><span class="hero-status-icon" style="${problems.length ? "background:var(--red-soft);color:var(--red)" : ""}">${icon(problems.length ? "alert" : "heart-pulse")}</span><div class="hero-status-copy"><span class="eyebrow">Estado geral</span><h3>${esc(overallTitle)}</h3><p>${esc(overallCopy)}</p></div><div class="hero-status-actions"><button class="button button--secondary button--compact" data-refresh-resource="health">${icon("refresh")} Verificar agora</button></div></section>
-      <section class="service-grid" style="margin-top:0.9375rem">${services.map((service) => `<article class="service-card"><div class="service-card-head"><span class="service-icon" style="${service.ok && !service.zombie ? "background:var(--green-soft);color:var(--green)" : "background:var(--red-soft);color:var(--red)"}">${icon(service.icon)}</span><span class="service-name"><strong>${esc(service.name)}</strong><small>${service.ok && !service.zombie ? "Operacional" : service.zombie ? "Estado zumbi" : "Indisponível"}</small></span>${pill(service.ok && !service.zombie ? "OK" : "Atenção", service.ok && !service.zombie ? "green" : "red")}</div><p class="service-detail">${esc(serviceDescription(service))}</p><div class="info-list" style="margin-top:0.625rem"><div class="info-row"><span>Latência</span><span>${service.latency_ms != null ? `${count(service.latency_ms)} ms` : "Não medida"}</span></div>${service.status_code != null ? `<div class="info-row"><span>HTTP</span><span>${esc(service.status_code)}</span></div>` : ""}${service.instance_name ? `<div class="info-row"><span>Instância</span><span>${esc(service.instance_name)}</span></div>` : ""}</div></article>`).join("")}</section>
+      <section class="service-grid" style="margin-top:0.9375rem">${services.map((service) => { const tone = serviceTone(service); return `<article class="service-card"><div class="service-card-head"><span class="service-icon" style="background:var(--${tone}-soft);color:var(--${tone})">${icon(service.icon)}</span><span class="service-name"><strong>${esc(service.name)}</strong><small>${tone === "green" ? "Operacional" : tone === "yellow" ? "Operacional, sem o modelo do código" : service.zombie ? "Estado zumbi" : "Indisponível"}</small></span>${pill(tone === "green" ? "OK" : tone === "yellow" ? "Parcial" : "Atenção", tone)}</div><p class="service-detail">${esc(serviceDescription(service))}</p><div class="info-list" style="margin-top:0.625rem"><div class="info-row"><span>Latência</span><span>${service.latency_ms != null ? `${count(service.latency_ms)} ms` : "Não medida"}</span></div>${service.status_code != null ? `<div class="info-row"><span>HTTP</span><span>${esc(service.status_code)}</span></div>` : ""}${service.instance_name ? `<div class="info-row"><span>Instância</span><span>${esc(service.instance_name)}</span></div>` : ""}${service.display_phone_number ? `<div class="info-row"><span>Número</span><span>${esc(service.display_phone_number)}</span></div>` : ""}${service.key === "whatsapp_cloud" && service.templates ? `<div class="info-row"><span>Modelo do código</span><span>${esc(templateState(service.templates.codigo_de_verificacao).label)}</span></div>` : ""}</div></article>`; }).join("")}</section>
       <div class="notice notice--info" style="margin-top:0.9375rem">${icon("activity")}<span>Este painel mostra apenas o estado atual. Ainda não há histórico de uptime persistido pelo backend.</span></div>`;
   }
 
@@ -2115,7 +2133,10 @@
       state.whatsapp = !whatsappConnected(result) && !result.qr_code && (previous.qr_code || previous.pairing_code)
         ? { ...result, qr_code: previous.qr_code, pairing_code: previous.pairing_code }
         : result;
-      if (state.page === "whatsapp" && !whatsappConnected(state.whatsapp) && result.status === "ok") startWhatsappPolling();
+      // Só vale vigiar a cada 3 s enquanto há um pareamento na tela: cada
+      // admin_status também consulta a Meta, e o Evolution pode ficar
+      // desconectado por dias agora que é só reserva.
+      if (state.page === "whatsapp" && !whatsappConnected(state.whatsapp) && result.status === "ok" && (state.whatsapp.qr_code || state.whatsapp.pairing_code)) startWhatsappPolling();
     }, options);
   }
 
@@ -2142,9 +2163,89 @@
     return null;
   }
 
+  /* WhatsApp oficial (Meta) ---------------------------------------------- */
+  // O servidor tenta a oficial primeiro em todo pedido de código, mas a Meta
+  // só aceita depois que o modelo de autenticação estiver APPROVED; até lá ela
+  // recusa e o MESMO código sai pelo Evolution.
+  function cloudPayload() {
+    const cloud = state.whatsapp?.whatsapp_cloud ?? state.health?.services?.whatsapp_cloud ?? null;
+    return cloud && cloud.configured !== false ? cloud : null;
+  }
+
+  function cloudSendsCode(cloud) {
+    return Boolean(cloud?.ok) && String(cloud?.templates?.codigo_de_verificacao || "").toUpperCase() === "APPROVED";
+  }
+
+  function templateState(status) {
+    const value = String(status || "").toUpperCase();
+    if (!value) return { label: "Não criado", tone: "neutral" };
+    return ({
+      APPROVED: { label: "Aprovado", tone: "green" },
+      PENDING: { label: "Em análise", tone: "yellow" },
+      IN_APPEAL: { label: "Em recurso", tone: "yellow" },
+      REJECTED: { label: "Rejeitado", tone: "red" },
+      PAUSED: { label: "Pausado", tone: "red" },
+      DISABLED: { label: "Desativado", tone: "red" }
+    })[value] || { label: value, tone: "neutral" };
+  }
+
+  function codeTemplatePhrase(cloud) {
+    if (!cloud?.templates) return "não aparece (falta WHATSAPP_CLOUD_WABA_ID no servidor)";
+    const status = cloud.templates.codigo_de_verificacao;
+    return status ? `está ${templateState(status).label.toLowerCase()} na Meta` : "ainda não existe na Meta";
+  }
+
+  // Por que o código ainda não sai pela oficial, do bloqueio mais básico ao mais fino.
+  function cloudCodeBlocker(cloud) {
+    if (!cloud) return "A API oficial não está configurada no servidor.";
+    if (cloud.error) return "A API oficial não respondeu à checagem.";
+    if (!cloud.templates?.codigo_de_verificacao && cloud.templates) return "O modelo de autenticação codigo_de_verificacao ainda não existe: a Meta só deixa criá-lo depois que a empresa for verificada.";
+    if (String(cloud.templates?.codigo_de_verificacao || "").toUpperCase() !== "APPROVED") return `O modelo de autenticação ${codeTemplatePhrase(cloud)}.`;
+    return `O número oficial não pode enviar agora (${cloudSendLabel(cloud.can_send_message).toLowerCase()}).`;
+  }
+
+  function cloudSendLabel(value) {
+    return ({ AVAILABLE: "Pode enviar", LIMITED: "Envio limitado", BLOCKED: "Bloqueado" })[String(value || "").toUpperCase()] || (value ? String(value) : "Sem resposta");
+  }
+
+  function cloudQualityLabel(value) {
+    return ({ GREEN: "Alta", YELLOW: "Média", RED: "Baixa" })[String(value || "").toUpperCase()] || "Sem nota ainda";
+  }
+
+  // "TIER_250" → "250 destinatários por 24 h"; a Meta sobe o degrau sozinha com o uso.
+  function cloudLimitLabel(value) {
+    const tier = String(value || "").toUpperCase().replace(/^TIER_/, "");
+    if (!tier) return "—";
+    if (tier === "UNLIMITED") return "Sem limite";
+    return `${tier.replace(/K$/, " mil")} destinatários por 24 h`;
+  }
+
+  function renderCloudPanels(cloud) {
+    const title = "Número oficial";
+    if (!cloud) return `<section class="content-grid">${panel(title, "API oficial da Meta", `<div class="notice notice--warning" style="margin:0">${icon("alert")}<span>Defina WHATSAPP_CLOUD_ACCESS_TOKEN e WHATSAPP_CLOUD_PHONE_NUMBER_ID nos segredos das funções para ligar a API oficial.</span></div>`, pill("Não configurada", "yellow"))}</section>`;
+    if (cloud.error) return `<section class="content-grid">${panel(title, "API oficial da Meta", `<div class="notice notice--danger" style="margin:0">${icon("alert")}<span>A Meta não respondeu à checagem. ${esc(cloud.error)}</span></div>`, pill("Sem resposta", "red"))}</section>`;
+    const send = String(cloud.can_send_message || "").toUpperCase();
+    const row = (label, value) => `<div class="info-row"><span>${esc(label)}</span><span>${esc(value)}</span></div>`;
+    const issues = (cloud.issues || []).filter(Boolean);
+    const issueBlock = `<div class="panel-head" style="margin-top:0.9375rem"><div><h3 class="section-title">Pendências</h3><p class="section-copy">O que a Meta aponta no número, na conta e na empresa</p></div>${pill(issues.length ? count(issues.length) : "Nenhuma", issues.length ? "yellow" : "green")}</div>${issues.length ? `<div class="activity-list">${issues.map((text) => `<div class="activity-item"><span class="activity-icon">${icon("alert")}</span><span class="activity-copy activity-copy--wrap"><strong>${esc(text)}</strong></span></div>`).join("")}</div>` : plainNotice("A Meta não aponta nenhuma pendência.")}`;
+    const numberPanel = panel(title, "Registrado na API oficial da Meta",`<div class="info-list">${row("Número", cloud.display_phone_number || "—")}${row("Nome exibido", cloud.verified_name || "—")}${row("Envio", cloudSendLabel(send))}${row("Qualidade", cloudQualityLabel(cloud.quality_rating))}${row("Limite", cloudLimitLabel(cloud.messaging_limit_tier))}${row("Resposta da Meta", cloud.latency_ms != null ? `${count(cloud.latency_ms)} ms` : "—")}</div>${issueBlock}`, pill(cloudSendLabel(send), send === "AVAILABLE" ? "green" : send === "LIMITED" ? "yellow" : "red"));
+    const templates = [
+      ["codigo_de_verificacao", "Código de verificação", "autenticação"],
+      ["aviso_android_vitals", "Aviso de Android vitals", "utilidade"]
+    ];
+    const templateRows = cloud.templates
+      ? `<div class="activity-list">${templates.map(([key, label, use]) => { const status = templateState(cloud.templates[key]); return `<div class="activity-item"><span class="activity-icon">${icon("message")}</span><span class="activity-copy"><strong>${esc(label)}</strong><small>${esc(key)} · ${esc(use)}</small></span>${pill(status.label, status.tone)}</div>`; }).join("")}</div>`
+      : `<div class="notice notice--warning" style="margin:0">${icon("alert")}<span>Sem WHATSAPP_CLOUD_WABA_ID o servidor não enxerga os modelos. O envio continua tentando a oficial.</span></div>`;
+    const codeNotice = cloudSendsCode(cloud)
+      ? `<div class="notice notice--plain" style="margin-top:0.75rem">${icon("check-circle")}<span>Modelo do código aprovado: o código de verificação sai pela API oficial, e o Evolution só entra se a Meta recusar um envio.</span></div>`
+      : `<div class="notice notice--info" style="margin:0.75rem 0 0">${icon("info")}<span>Enquanto o modelo codigo_de_verificacao não estiver aprovado, o código sai pelo Evolution (reserva). Não precisa publicar nada quando ele for aprovado: a função passa a usar a oficial sozinha.</span></div>`;
+    const templatePanel = panel("Modelos de mensagem", "Mensagem que o Gain inicia só sai por modelo aprovado", templateRows + codeNotice);
+    return `<section class="content-grid">${numberPanel}${templatePanel}</section>`;
+  }
+
   function renderWhatsapp() {
-    const header = pageHeading("Conexão e verificações", "Gerencie a instância usada nos códigos de telefone e acompanhe a taxa de sucesso das verificações.");
-    if (!state.whatsapp && state.loading.whatsapp) return header + loadingState("Consultando a Evolution API…");
+    const header = pageHeading("Conexão e verificações", "Veja por onde sai o código de telefone (API oficial da Meta ou Evolution de reserva) e acompanhe a taxa de sucesso das verificações.");
+    if (!state.whatsapp && state.loading.whatsapp) return header + loadingState("Consultando a API oficial e o Evolution…");
     if (state.errors.whatsapp && !state.whatsapp) return header + errorState(state.errors.whatsapp, "whatsapp");
     const payload = state.whatsapp || {};
     const configured = payload.status !== "not_configured";
@@ -2156,8 +2257,26 @@
     const instanceInfo = payload.instance || {};
     const qr = qrImageSource(payload.qr_code);
     const statusTitle = !configured ? "Integração não configurada" : connected ? "WhatsApp conectado" : payload.qr_code || payload.pairing_code ? "Aguardando pareamento" : "WhatsApp desconectado";
-    const statusCopy = !configured ? "Configure os secrets da Evolution API na Edge Function." : connected ? "A instância está pronta para verificações e comunicados." : "Gere um QR code e faça o pareamento pelo WhatsApp.";
-    return header + `<section class="hero-status" style="${connected ? "" : "background:linear-gradient(130deg,rgba(245,200,75,.09),rgba(91,155,255,.035))"}"><span class="hero-status-icon" style="${connected ? "" : "background:var(--yellow-soft);color:var(--yellow)"}">${icon("phone")}</span><div class="hero-status-copy"><span class="eyebrow">Conexão Evolution</span><h3>${esc(statusTitle)}</h3><p>${esc(statusCopy)}</p></div><div class="hero-status-actions">${configured && !connected ? `<button class="button button--primary button--compact" data-whatsapp-action="admin_connect">${icon("refresh")} Gerar pareamento</button>` : ""}${connected ? `<button class="button button--secondary button--compact" data-whatsapp-action="admin_logout">Desconectar</button>` : ""}</div></section>
+    const cloud = cloudPayload();
+    const statusCopy = !configured ? "Configure os secrets da Evolution API na Edge Function." : connected ? "Pronto para entregar o código quando a oficial recusar e para enviar os comunicados." : `Gere um QR code e faça o pareamento pelo WhatsApp.${cloud?.display_phone_number ? ` Use outro número: o ${cloud.display_phone_number} agora é da API oficial.` : ""}`;
+    // Quem entrega o código agora. A oficial é tentada sempre, mas só entrega
+    // com o modelo aprovado; o Evolution recebe o mesmo código quando ela recusa.
+    const viaCloud = cloudSendsCode(cloud);
+    const reserveReady = configured && connected;
+    const codeTone = viaCloud ? "green" : reserveReady ? "yellow" : "red";
+    const codeTitle = viaCloud ? "O código sai pela API oficial" : reserveReady ? "O código sai pelo Evolution (reserva)" : "Nenhum canal está entregando o código";
+    const codeCopy = viaCloud
+      ? `Modelo codigo_de_verificacao aprovado na Meta. ${reserveReady ? "Se a oficial recusar um envio, o mesmo código segue pelo Evolution." : "Sem reserva: o Evolution está desconectado."}`
+      : `${cloudCodeBlocker(cloud)} ${reserveReady ? "Enquanto isso, o mesmo código sai pelo Evolution." : "E o Evolution está desconectado: quem pedir o código agora não recebe."}`;
+    const heroTone = {
+      green: ["", ""],
+      yellow: ["background:linear-gradient(130deg,rgba(245,200,75,.09),rgba(91,155,255,.035))", "background:var(--yellow-soft);color:var(--yellow)"],
+      red: ["background:linear-gradient(130deg,rgba(255,107,112,.09),rgba(245,200,75,.035))", "background:var(--red-soft);color:var(--red)"]
+    }[codeTone];
+    const codeHero = `<section class="hero-status" style="${heroTone[0]}"><span class="hero-status-icon" style="${heroTone[1]}">${icon(codeTone === "red" ? "alert" : "shield")}</span><div class="hero-status-copy"><span class="eyebrow">Código de verificação</span><h3>${esc(codeTitle)}</h3><p>${esc(codeCopy)}</p></div><div class="hero-status-actions"><button class="button button--secondary button--compact" data-refresh-resource="whatsapp">${icon("refresh")} Verificar agora</button></div></section>
+      <h3 class="section-divider">WhatsApp oficial (Meta) <small>Tentada primeiro em todo pedido de código</small></h3>${renderCloudPanels(cloud)}
+      <h3 class="section-divider">Evolution · reserva <small>Entrega o código quando a oficial recusa e é por onde saem os comunicados</small></h3>`;
+    return header + codeHero + `<section class="hero-status" style="${connected ? "" : "background:linear-gradient(130deg,rgba(245,200,75,.09),rgba(91,155,255,.035))"}"><span class="hero-status-icon" style="${connected ? "" : "background:var(--yellow-soft);color:var(--yellow)"}">${icon("phone")}</span><div class="hero-status-copy"><span class="eyebrow">Reserva · Evolution</span><h3>${esc(statusTitle)}</h3><p>${esc(statusCopy)}</p></div><div class="hero-status-actions">${configured && !connected ? `<button class="button button--primary button--compact" data-whatsapp-action="admin_connect">${icon("refresh")} Gerar pareamento</button>` : ""}${connected ? `<button class="button button--secondary button--compact" data-whatsapp-action="admin_logout">Desconectar</button>` : ""}</div></section>
       ${configured ? `<section class="content-grid" style="margin-top:0.9375rem"><article class="panel"><div class="panel-head"><div><h3 class="section-title">Configuração da instância</h3><p class="section-copy">Segredos completos nunca são exibidos</p></div>${pill(connected ? "Conectado" : "Desconectado", connected ? "green" : "yellow")}</div><div class="info-list"><div class="info-row"><span>Instância</span><span>${esc(instanceInfo.resolved || config.instance_name || "—")}${instanceInfo.adopted ? ` <small style="color:var(--yellow)">secret aponta para ${esc(instanceInfo.configured || "—")}</small>` : ""}</span></div><div class="info-row"><span>Número operador</span><span>${esc(config.owner_number || "—")}</span></div><div class="info-row"><span>Endpoint</span><span>${esc(config.base_url || "—")}</span></div><div class="info-row"><span>Chave</span><span>${esc(config.api_key_masked || "mascarada")}</span></div><div class="info-row"><span>Atualizada</span><span>${esc(config.updated_at ? new Date(config.updated_at).toLocaleString("pt-BR") : "—")}</span></div></div><div class="detail-actions" style="margin-top:0.9375rem"><button class="button button--secondary button--compact" data-whatsapp-action="admin_repair">Reparar sem QR</button><button class="button button--warning-soft button--compact" data-whatsapp-action="admin_reset">Reiniciar pareamento</button><button class="button button--danger-soft button--compact" data-whatsapp-action="admin_force_recreate">Recriar instância</button></div></article>
       <article class="panel"><div class="panel-head"><div><h3 class="section-title">Pareamento</h3><p class="section-copy">Use o WhatsApp do número operador</p></div></div><div class="qr-layout qr-layout--tight"><div class="qr-frame">${qr ? `<img src="${esc(qr)}" alt="QR code para conectar o WhatsApp">` : `<div class="qr-placeholder">${icon("phone")}<p>${connected ? "Instância conectada" : "Gere um novo QR code"}</p></div>`}</div><div><h3 class="section-title">${connected ? "Conexão pronta" : "Abra Aparelhos conectados"}</h3><p class="section-copy">No WhatsApp, acesse Configurações → Aparelhos conectados e leia o código.</p>${payload.pairing_code ? `<span class="pairing-code">${esc(payload.pairing_code)}</span>` : ""}${payload.message ? `<div class="notice" style="margin:0.75rem 0 0"><span>${esc(payload.message)}</span></div>` : ""}</div></div></article></section>` : `<div class="notice notice--warning" style="margin-top:0.9375rem">${icon("alert")}<span>A configuração EVOLUTION_BASE_URL, EVOLUTION_API_KEY e EVOLUTION_INSTANCE_NAME precisa ser concluída no servidor.</span></div>`}
       <section style="margin-top:0.9375rem">${renderVerificationMetrics()}</section>`;
@@ -2175,11 +2294,22 @@
        porque a linha do código só nasce depois do envio dar certo. Sem este
        bloco, a queda fica invisível aqui até um usuário reclamar. */
     const fail = data.failures || {};
-    const failFoot = fail.last7d ? `${count(fail.last24h)} nas últimas 24h` : "Nenhuma falha registrada";
+    /* Recusa inesperada da oficial (token, pagamento, número) vira linha mesmo
+       quando o Evolution entrega logo depois; a esperada, por falta do modelo,
+       só conta quando não há reserva (ver recusaVaiParaAsFalhas). */
+    const cloudFails = Object.entries(fail.by_reason || {}).reduce((sum, [reason, total]) => sum + (reason.startsWith("cloud_") ? asNumber(total) : 0), 0);
+    const failFoot = fail.last7d ? `${count(fail.last24h)} nas últimas 24h${cloudFails ? ` · ${count(cloudFails)} recusas da oficial` : ""}` : "Nenhuma falha registrada";
     const motivoDaFalha = {
       whatsapp_disconnected: "WhatsApp desconectado",
       instance_missing: "Instância ausente",
-      provider_error: "Erro do provedor"
+      provider_error: "Erro do provedor",
+      cloud_template_missing: "Oficial: modelo ausente",
+      cloud_payment: "Oficial: pagamento",
+      cloud_auth: "Oficial: token ou permissão",
+      cloud_rate_limited: "Oficial: limite de envio",
+      cloud_number: "Oficial: número bloqueado",
+      cloud_unreachable: "Oficial: sem resposta",
+      cloud_error: "Oficial: erro"
     };
     const failRows = (fail.recent || []).slice(0, 6).map((item) =>
       `<div class="activity-item"><span class="activity-icon">${icon("alert")}</span><span class="activity-copy"><strong>${esc(item.phone_masked || "Número protegido")}</strong><small>${item.created_at ? new Date(item.created_at).toLocaleString("pt-BR") : "—"}</small></span>${pill(motivoDaFalha[item.reason] || item.reason || "Falha", "red")}</div>`
