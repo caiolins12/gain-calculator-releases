@@ -341,6 +341,7 @@
     if (!response.ok) {
       const error = new Error(json.message || json.error_description || json.msg || `Falha no servidor (${response.status}).`);
       error.status = response.status;
+      error.code = json.code || "";
       throw error;
     }
     return json;
@@ -525,6 +526,28 @@
   }
 
   /* Carregamento --------------------------------------------------------- */
+  /* Falha passageira (consulta que estourou o tempo no banco, 502/503/504 da
+     função, queda de rede) não vira "Tentar novamente" de cara: o painel
+     repete sozinho, com pausa crescente. Todas as cargas só leem. */
+  const RETRY_DELAYS_MS = [1500, 4000];
+
+  function transientError(error) {
+    if (error instanceof TypeError) return true;
+    const status = asNumber(error?.status);
+    return error?.code === "57014" || status === 408 || status === 429 || status >= 500;
+  }
+
+  async function loadWithRetry(name, sequence, loader) {
+    for (let attempt = 0; ; attempt += 1) {
+      try { return await loader(); }
+      catch (error) {
+        if (attempt >= RETRY_DELAYS_MS.length || !transientError(error) || state.sequence[name] !== sequence) throw error;
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+        if (state.sequence[name] !== sequence) throw error;
+      }
+    }
+  }
+
   async function loadResource(name, loader, apply, { quiet = false } = {}) {
     const sequence = (state.sequence[name] || 0) + 1;
     state.sequence[name] = sequence;
@@ -532,7 +555,7 @@
     delete state.errors[name];
     if (!quiet) renderCurrentPage();
     try {
-      const result = await loader();
+      const result = await loadWithRetry(name, sequence, loader);
       if (state.sequence[name] !== sequence) return null;
       apply(result);
       state.lastUpdated = Date.now();
@@ -615,15 +638,17 @@
     renderCurrentPage();
   }
 
+  /* Roda logo depois de showApp, que já pediu os dados da página aberta: o que
+     está carregando não é pedido de novo. Antes as métricas saíam em dobro ao
+     abrir e as seis consultas juntas estouravam o tempo do banco. */
   async function loadCore() {
+    const idle = (name, load) => (state.loading[name] ? null : load({ quiet: true }));
     await Promise.allSettled([
-      loadDevices({ quiet: true }),
-      loadDiagnostics({ quiet: true }),
-      loadHealth({ quiet: true }),
-      loadGrowth({ quiet: true }),
-      loadSales({ quiet: true }),
-      loadAdoption({ quiet: true }),
-      loadVitals({ quiet: true })
+      idle("devices", loadDevices),
+      idle("diagnostics", loadDiagnostics),
+      idle("health", loadHealth),
+      idle("vitals", loadVitals),
+      ensureMetrics(["growth", "sales", "adoption"], { quiet: true })
     ]);
   }
 
