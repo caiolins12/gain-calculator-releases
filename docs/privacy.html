@@ -17,7 +17,7 @@
             <p class="eyebrow">Gain Calculator</p>
             <h1>Política de Privacidade</h1>
             <p class="subtitle">Como tratamos seus dados no Gain Calculator</p>
-            <p class="meta">Versão 14 &middot; Vigente desde 9 de outubro de 2026</p>
+            <p class="meta">Versão 15 &middot; Vigente desde 28 de outubro de 2026</p>
         </header>
 
         <section class="legal-section">
@@ -41,7 +41,7 @@ Contato para qualquer assunto desta Política, inclusive exercício de direitos:
 • Preferências de configuração: limites de aceite, perfil de consumo do veículo, tipo de veículo (carro ou moto), lista de aplicativos que você escolheu monitorar e demais ajustes feitos na tela de Ajustes.
 • Chave Pix de recebimento (opcional): se você utilizar o recurso de receber pagamentos por QR Pix, os dados que você mesmo informa — chave, tipo de chave, nome do recebedor e cidade — ficam guardados no dispositivo e sincronizados na sua conta para montar o QR Code. Esses dados servem apenas para gerar o código que você mostra ao passageiro; nós não intermediamos, recebemos nem temos visibilidade sobre esses pagamentos, que ocorrem diretamente entre você e o pagador.
 • Estatísticas de uso: ver a seção 6 desta Política, que descreve em detalhe o que é medido e o que deliberadamente não é.
-• Distância percorrida (opcional): se você conceder a permissão de localização, pedida ao ativar o monitoramento, o app lê a localização do aparelho enquanto o monitoramento estiver ativo e guarda apenas quantos quilômetros foram rodados em cada turno e em que intervalo de horário. Nenhuma coordenada é gravada e nada disso sai do seu aparelho — ver a seção 26.
+• Distância percorrida (opcional): se você conceder a permissão de localização, pedida ao ativar o monitoramento, o app lê a localização do aparelho enquanto o monitoramento estiver ligado — com o ícone flutuante aberto (seção 4) — e guarda apenas quantos quilômetros foram rodados em cada turno e em que intervalo de horário. Nenhuma coordenada é gravada e nada disso sai do seu aparelho — ver a seção 26.
 • Dados de pagamento da assinatura: quando você assina um plano pela Google Play, recebemos da Google o identificador da compra, o plano, o número do pedido, a situação da assinatura (ativa, cancelada, vencida ou estornada), a data até quando ela vale, se renova sozinha e o país da conta Google. Para prender a compra à sua conta do Gain, o app envia à Google um código derivado do identificador da sua conta (um resumo criptográfico, que não revela nome, e-mail nem telefone). Os dados do cartão e das demais formas de pagamento ficam com a Google e não chegam a nós. Nas compras feitas antes por Pix ou cartão (Mercado Pago), recebemos do processador o status (aprovado, pendente, recusado), o método utilizado, o valor e o e-mail informado no checkout; também nesse caso não armazenamos números de cartão.</p>
         </section>
 
@@ -49,7 +49,7 @@ Contato para qualquer assunto desta Política, inclusive exercício de direitos:
             <h2>3. Dados de passageiros e de terceiros</h2>
             <p>Esta é a seção mais importante desta Política, porque trata de dados de pessoas que nunca instalaram o nosso app e nunca falaram conosco.
 
-Quando o monitoramento está ativo e você trabalha, a tela do aplicativo de transporte mostra informações do passageiro. O Gain Calculator lê e guarda as seguintes, quando aparecem:
+Quando você trabalha com o serviço de acessibilidade do app ligado, a tela do aplicativo de transporte mostra informações do passageiro. O Gain Calculator lê e guarda as seguintes, quando aparecem:
 • O PRIMEIRO NOME (ou o nome exibido) do passageiro, usado para saber qual corrida está em andamento, distinguir uma corrida da seguinte e identificar o lançamento no seu Extrato.
 • A avaliação do passageiro (a nota exibida pela plataforma).
 • Os endereços de embarque e desembarque da corrida — rua, número, bairro e o nome do local quando exibido.
@@ -74,20 +74,22 @@ Sua responsabilidade: como esses são dados de outra pessoa, você se compromete
             <h2>4. Leitura da tela durante o monitoramento</h2>
             <p>Este é o recurso central do app e merece descrição própria.
 
-Enquanto o monitoramento está ativo, o Gain Calculator lê o conteúdo exibido na tela pelos aplicativos de transporte que VOCÊ selecionou na lista de aplicativos monitorados. Tudo passa por uma única permissão: o serviço de acessibilidade do Android, que você ativa manualmente e pode revogar quando quiser.
+Enquanto o serviço de acessibilidade do Gain Calculator está ligado e você está conectado à sua conta, o app lê o conteúdo exibido na tela para encontrar as solicitações dos aplicativos de transporte que VOCÊ selecionou na lista de aplicativos monitorados. Tudo passa por uma única permissão: o serviço de acessibilidade do Android, que você ativa manualmente e pode revogar quando quiser.
+
+A leitura das solicitações é CONTÍNUA: ela não depende do botão de monitoramento da tela inicial. Esse botão abre e fecha apenas o ícone flutuante e, junto com ele, o turno — a medição da distância (seção 26) e o tempo de monitoramento (seção 6). Com o ícone fechado, as solicitações continuam sendo lidas e analisadas, e uma corrida aceita reabre o ícone sozinha. Para interromper a leitura, desligue o serviço de acessibilidade do Gain Calculator nos Ajustes do Android.
 
 A leitura acontece por dois caminhos, que se complementam:
 
-• Árvore de acessibilidade: o app consulta a janela em primeiro plano para ler os textos da solicitação de corrida (preço, distância, tempo, avaliação e nome do passageiro, endereços).
+• Árvore de acessibilidade: o app consulta a janela do aplicativo de transporte para ler os textos da solicitação de corrida (preço, distância, tempo, avaliação e nome do passageiro, endereços).
 • Foto da tela tirada pelo próprio serviço de acessibilidade: quando o aplicativo de transporte desenha a solicitação como imagem e não há texto para ler, o serviço pede ao sistema uma imagem da tela e faz o reconhecimento óptico dela. O app NÃO usa a permissão de projeção de mídia (compartilhamento de tela) — não há pedido de "gravar ou transmitir a tela" e não aparece o ícone de transmissão no seu aparelho.
 
 Em ambos os casos, o reconhecimento de texto roda LOCALMENTE no seu dispositivo (Google ML Kit on-device). As imagens da sua tela não são enviadas para nossos servidores nem para terceiros, e são descartadas da memória logo após o reconhecimento. Apenas os dados estruturados da corrida (preço, distância, endereços, nome do passageiro) podem ser sincronizados na sua conta, se você estiver autenticado.
 
-A leitura é restrita aos aplicativos que você marcou, mais os aplicativos de NAVEGAÇÃO mais comuns (Waze, Google Maps e Android Auto). A navegação entra porque as plataformas de transporte desenham a solicitação de corrida POR CIMA do aplicativo que estiver na tela: sem essa leitura, uma corrida oferecida enquanto você navega não seria lida. Essa leitura só acontece enquanto o monitoramento está ligado — com nenhum aplicativo marcado, o monitoramento é desativado por completo e nada é lido, inclusive nos navegadores.
+Onde a foto da tela é tirada: as plataformas de transporte desenham a solicitação de corrida POR CIMA do aplicativo que estiver na tela — a tela inicial, o Waze, o Google Maps, o Android Auto ou qualquer outro. Por isso, enquanto o serviço de acessibilidade está ligado, a foto pode ser tirada com outro aplicativo em primeiro plano, e o reconhecimento lê o texto que estiver nela (o "outro conteúdo gerado pelo usuário" da declaração da Google Play). Tudo acontece no aparelho: o que não é uma solicitação de corrida é descartado na hora, sem ser guardado nem enviado. Essa leitura só acontece com o serviço de acessibilidade ligado e uma conta conectada — sem conta, ou com nenhum aplicativo marcado, a leitura é desativada por completo e nada é lido.
 
-Fora disso, o app não lê a tela de aplicativos não selecionados, e mantém bloqueio permanente sobre categorias sensíveis — aplicativos de banco, mensageria e visualizadores de imagem não são lidos em nenhuma hipótese, mesmo que apareçam na tela.
+Categorias sensíveis ficam de fora: o app nunca fotografa por conta própria a tela de aplicativos de banco e carteiras digitais, cofres de senha, saúde, mensageria (WhatsApp, Telegram, SMS e semelhantes), galerias, seletores de fotos e gerenciadores de arquivos. A única exceção é a solicitação de corrida desenhada por cima de um deles: nesses segundos a imagem é lida para encontrar a corrida, e o que aparecer atrás dela é descartado no aparelho, como qualquer conteúdo que não seja corrida.
 
-O monitoramento apenas LÊ. Ele não toca em botões, não aceita nem recusa corridas e não executa nenhuma ação dentro de outros aplicativos em seu nome. O mesmo serviço de acessibilidade é usado pelo Gain Copiloto, e SOMENTE quando você pede por voz, para quatro gestos de sistema: voltar, abrir os aplicativos recentes, abrir as notificações e tirar um print (seção 28). Você pode desligar o serviço de acessibilidade a qualquer momento, nos Ajustes do Android, e o monitoramento cessa imediatamente.
+O monitoramento apenas LÊ. Ele não toca em botões, não aceita nem recusa corridas e não executa nenhuma ação dentro de outros aplicativos em seu nome. O mesmo serviço de acessibilidade é usado pelo Gain Copiloto, e SOMENTE quando você pede por voz, para quatro gestos de sistema: voltar, abrir os aplicativos recentes, abrir as notificações e tirar um print (seção 28). Você pode desligar o serviço de acessibilidade a qualquer momento, nos Ajustes do Android, e a leitura cessa imediatamente.
 
 Se você ativar o recurso opcional de Captura de Tela automática, o app salva na galeria do seu aparelho (pasta pública "Pictures/GainCalculator") uma imagem de cada solicitação detectada. Essas imagens ficam somente no seu dispositivo, sob seu controle, e não são enviadas a nós nem a terceiros. Como elas contêm o nome do passageiro e os endereços da corrida, valem para elas os mesmos cuidados da seção 3.</p>
         </section>
@@ -109,7 +111,7 @@ Este recurso funciona com o monitoramento desligado e não depende do serviço d
             <p>Para decidir o que melhorar, o app registra estatísticas sobre COMO ele é usado. Descrevemos aqui exatamente o que é medido, porque a diferença entre uma métrica de produto e um rastro de comportamento está nos detalhes.
 
 O que é registrado:
-• Tempo de monitoramento: início e duração dos períodos em que você manteve o monitoramento ligado. É a medida de uso real do produto — não é tempo de tela do app, porque o motorista usa o Gain com o aplicativo de transporte à frente.
+• Tempo de monitoramento: início e duração dos períodos em que você manteve o monitoramento ligado, isto é, o ícone flutuante aberto — a leitura contínua da seção 4 com o ícone fechado não entra. É a medida de uso real do produto — não é tempo de tela do app, porque o motorista usa o Gain com o aplicativo de transporte à frente.
 • Tempo por tela: o nome de cada tela do app (por exemplo, "Relatórios") e o total de milissegundos que ela ficou visível, além do número de vezes que foi aberta.
 • Contadores de eventos: totais de ações relevantes do produto, como quantas vezes a janela de aceite foi exibida, tocada ou dispensada, e quantas corridas foram finalizadas. São apenas nomes de evento e contagens.
 • Tipo de veículo declarado e versão do app instalada.
@@ -141,7 +143,7 @@ Por que existe: uma queixa do tipo "várias solicitações não foram lidas" só
 
 O que sobe, depois do seu aceite: o registro técnico das decisões do monitoramento, que CONTÉM dados de operação — endereços lidos, valores, distâncias, horários, o aplicativo de origem e o motivo de cada decisão —, acompanhado do seu e-mail, do hash do dispositivo e da versão do app.
 
-Como sobe: automaticamente, a cada cinco minutos, enquanto o monitoramento estiver ligado, sem perguntar de novo a cada envio — o acordo foi o aceite. Há teto por lote e teto diário, para que o recurso não vire uma torneira aberta no seu plano de dados.
+Como sobe: automaticamente, a cada cinco minutos, enquanto a leitura das solicitações estiver ligada (seção 4), sem perguntar de novo a cada envio — o acordo foi o aceite. Há teto por lote e teto diário, para que o recurso não vire uma torneira aberta no seu plano de dados.
 
 Quem pode ligar: o aceite é conferido no SERVIDOR, não no aplicativo. Uma conta sem aceite recebe recusa e o envio se desliga sozinho.
 
@@ -182,12 +184,12 @@ As notificações de funcionamento não podem ser desligadas sem desligar o recu
 
         <section class="legal-section">
             <h2>11. O que NÃO coletamos</h2>
-            <p>• Não guardamos coordenadas nem trilhas de percurso. O app passou a oferecer uma medição OPCIONAL da distância rodada (seção 26): concedida a permissão, a localização é lida durante o monitoramento e convertida em metros na hora; a latitude e a longitude ficam apenas na memória, entre duas leituras, e não são gravadas em lugar nenhum nem enviadas a nós. Sem a permissão de localização nenhuma leitura de localização acontece, e o odômetro volta a ser estimado.
+            <p>• Não guardamos coordenadas nem trilhas de percurso. O app passou a oferecer uma medição OPCIONAL da distância rodada (seção 26): concedida a permissão, a localização é lida com o monitoramento ligado (ícone flutuante aberto) e convertida em metros na hora; a latitude e a longitude ficam apenas na memória, entre duas leituras, e não são gravadas em lugar nenhum nem enviadas a nós. Sem a permissão de localização nenhuma leitura de localização acontece, e o odômetro volta a ser estimado.
 • Não coletamos o seu endereço residencial, comercial ou de cobrança. Os únicos endereços armazenados pelo app são os pontos de embarque e desembarque exibidos nas solicitações de corrida.
 • Não acessamos suas mensagens (SMS/WhatsApp), seu histórico de chamadas nem seus e-mails. A agenda de contatos só é consultada se você pedir ao Gain Copiloto para ligar ou mandar mensagem para alguém e tiver concedido a permissão: a busca acontece no aparelho, na hora do pedido, e a agenda não é enviada a nós nem a terceiros (seção 28).
 • Não navegamos pela sua galeria de fotos. O app ESCREVE nela os arquivos que você pediu — as gravações de vídeo e, se ativado, os prints das solicitações — e só consegue LER a imagem única que você escolher no seletor do Android para a leitura por print (seção 5).
 • Não pedimos a permissão de projeção de mídia (compartilhamento ou gravação da tela). A imagem da tela usada pelo reconhecimento vem do próprio serviço de acessibilidade.
-• Não lemos a tela de aplicativos que você não selecionou, e nunca a de aplicativos de banco, mensageria ou visualizadores de imagem.
+• Não fotografamos a tela de aplicativos de banco, senhas, saúde, mensageria ou galeria (só a solicitação de corrida desenhada por cima deles, seção 4), e o que a leitura encontra nos outros aplicativos e não é corrida é descartado no aparelho.
 • Não clicamos em botões de outros aplicativos. O monitoramento apenas lê o que aparece na tela — nunca aceita ou recusa corridas em seu nome. As únicas ações fora do app são os comandos que você pede por voz ao Gain Copiloto (seção 28).
 • Não utilizamos plataformas de publicidade, analytics de terceiros nem ferramentas de attribution. O app não exibe anúncios.
 • Não vendemos, alugamos nem cedemos dados pessoais a quem quer que seja.</p>
@@ -333,7 +335,7 @@ A versão vigente está sempre disponível dentro do app e na página pública d
 
 QUAL PERMISSÃO. A medição exige a localização PRECISA (exata). A opção aproximada do Android tem erro de centenas de metros a quilômetros por leitura, incompatível com a soma de distância: concedendo apenas ela, o app não mede nada e o odômetro segue estimado pelas corridas.
 
-QUANDO A LEITURA ACONTECE. Somente com as DUAS condições ao mesmo tempo: a permissão de localização precisa concedida e o monitoramento ativo. Desligou o monitoramento, para de ler. Revogou a permissão, para de ler. Nunca há leitura de localização com o app apenas instalado ou em segundo plano fora do monitoramento, e o app NÃO pede a permissão de localização em segundo plano (ACCESS_BACKGROUND_LOCATION).
+QUANDO A LEITURA ACONTECE. Somente com as DUAS condições ao mesmo tempo: a permissão de localização precisa concedida e o monitoramento ligado — o ícone flutuante aberto, pelo botão da tela inicial ou sozinho quando uma corrida é aceita. Fechou o ícone, para de ler. Revogou a permissão, para de ler. A leitura contínua das solicitações (seção 4) não liga a localização: com o ícone fechado, ou com o app apenas instalado, não há leitura de localização nenhuma, e o app NÃO pede a permissão de localização em segundo plano (ACCESS_BACKGROUND_LOCATION).
 
 O QUE É GRAVADO. Apenas dois números por turno: a distância total percorrida e o intervalo de horário em que o turno ocorreu. A latitude e a longitude são usadas em memória, entre duas leituras consecutivas, só para calcular a distância entre elas, e são descartadas em seguida. Não existe trilha, histórico de percurso ou registro de onde você esteve, e não há como reconstruir um a partir do que fica guardado.
 
