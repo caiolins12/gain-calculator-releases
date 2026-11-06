@@ -1448,7 +1448,9 @@ dialog::backdrop { background: rgba(2,6,10,.72); backdrop-filter: blur(4px); }
 .referral-times { color: var(--muted); font-size: 0.5rem; font-weight: 700; margin-left: -0.125rem; }
 .referral-children { display: grid; padding: 0 0.125rem 0.625rem 2.875rem; }
 .referral-item .row-actions, .referral-child .row-actions, .referral-row .row-actions { justify-self: end; }
-.referral-child, .referral-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr) minmax(0, 1.7fr) 4.25rem; align-items: center; gap: 0.75rem; min-width: 0; padding: 0.5625rem 0; border-top: 1px dashed var(--line-soft); }
+.icon-button--danger:hover { background: var(--red-soft); color: var(--red); border-color: transparent; }
+.referral-child.is-cancelled > :not(.row-actions), .referral-row.is-cancelled > :not(.row-actions) { opacity: .6; }
+.referral-child, .referral-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr) minmax(0, 1.6fr) 6.375rem; align-items: center; gap: 0.75rem; min-width: 0; padding: 0.5625rem 0; border-top: 1px dashed var(--line-soft); }
 .referral-row { border-top: 0; border-bottom: 1px solid var(--line-soft); }
 .referral-row:last-child { border-bottom: 0; }
 @media (max-width: 950px) {
