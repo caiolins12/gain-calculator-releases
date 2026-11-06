@@ -2310,7 +2310,7 @@
     const pending = asNumber(totals.pending_play);
     const notice = pending ? `<div class="notice notice--warning ref-notice">${icon("alert")}<span>${count(pending)} ${pending === 1 ? "adiamento" : "adiamentos"} na Play ainda por fazer. O servidor tenta de novo quando quem indicou abre Indicações no app.</span></div>` : "";
     if (!total && !asNumber(totals.cancelled)) {
-      return header + tiles + emptyState("Nenhuma indicação ainda", "O código aparece para quem abre Indicações no app (versão 257 em diante) e só vale na criação de uma conta nova.", "gift");
+      return header + tiles + emptyState("Nenhuma indicação ainda", "O código aparece para quem abre Indicações no app (versão 258 em diante) e só vale na criação de uma conta nova.", "gift");
     }
     const lists = referralLists();
     const toolbar = `<div class="ref-toolbar">${referralTabs(lists.totals)}<label class="search-field">${icon("search")}<input id="referral-search" type="search" value="${esc(state.referralFilter)}" placeholder="Nome, e-mail, telefone ou código" aria-label="Buscar indicações por nome, e-mail, telefone ou código"></label></div>`;
@@ -3434,7 +3434,7 @@
         <h3>Janela que o card abre</h3>
         ${newsImagePicker("guide")}
         ${newsField("guide_description", "Descrição da imagem", item.guide_description, { textarea: true, maxlength: 1200, hint: "O passo a passo da imagem em texto. O TalkBack lê isto, e a janela mostra este texto se a imagem não carregar." })}
-        ${newsField("button_url", "Link do botão", item.button_url, { maxlength: 2048, placeholder: "https://…", hint: "Opcional: um link https, ou app:indicacoes para abrir a janela de Indicações do app (257+). Com link aparece um botão embaixo da imagem; sem link, a janela é só a imagem e o X." })}
+        ${newsField("button_url", "Link do botão", item.button_url, { maxlength: 2048, placeholder: "https://…", hint: "Opcional: um link https, ou app:indicacoes para abrir a janela de Indicações do app (258+). Com link aparece um botão embaixo da imagem; sem link, a janela é só a imagem e o X." })}
         ${newsField("button_label", "Texto do botão", item.button_label, { maxlength: 40, placeholder: item.button_url ? "Abrir" : "Entendi" })}
       </section>
       <section class="detail-section">
