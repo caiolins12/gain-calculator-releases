@@ -13,6 +13,7 @@
     sales: { eyebrow: "Negócio", title: "Vendas", description: "Receita, assinantes, testes acabando e quem foi embora." },
     adoption: { eyebrow: "Negócio", title: "Uso e adoção", description: "Quantos usam, quanto, de qual plataforma e quem parou." },
     users: { eyebrow: "Clientes", title: "Usuários", description: "Contas, licenças, dispositivos e uso do monitoramento." },
+    referrals: { eyebrow: "Clientes", title: "Indicações", description: "Indique e ganhe: quem indicou, quantos entraram e o que cada lado ganhou." },
     broadcast: { eyebrow: "Clientes", title: "Comunicados", description: "Envio controlado de mensagens para números verificados ou uma lista manual." },
     assistant: { eyebrow: "Produto", title: "Gain IA", description: "Modelo, gasto com a OpenAI, experiência no app e uso por conta." },
     news: { eyebrow: "Produto", title: "Novidades", description: "Cards e janelas da seção Novidades da tela inicial do app." },
@@ -50,6 +51,8 @@
     vitals: null,
     versions: null,
     news: null,
+    referrals: null,
+    referralFilter: "",
     period: storedPeriod(),
     growth: null,
     sales: null,
@@ -668,6 +671,7 @@
         sales: () => Promise.allSettled([loadSales({ quiet: true }), loadDevices({ quiet: true })]),
         adoption: () => Promise.allSettled([loadAdoption({ quiet: true }), loadStatistics({ quiet: true })]),
         users: () => Promise.allSettled([loadDevices({ quiet: true }), loadVersions({ quiet: true })]),
+        referrals: () => loadReferrals({ quiet: true }),
         diagnostics: () => loadDiagnostics({ quiet: true }),
         news: () => loadNews({ quiet: true }),
         traces: () => loadTraces({ quiet: true }),
@@ -731,6 +735,7 @@
     if (page === "users" && !state.versions && !state.loading.versions) loadVersions();
     if (page === "traces" && !state.traces && !state.loading.traces) loadTraces();
     if (page === "vitals" && !state.vitals && !state.loading.vitals) loadVitals();
+    if (page === "referrals" && !state.referrals && !state.loading.referrals) loadReferrals();
     if (page === "news" && !state.news && !state.loading.news) loadNews();
     if (page === "assistant") {
       if (!state.ai.config && !state.loading.aiConfig) loadAiAssistant();
@@ -2058,6 +2063,119 @@
     const detail = state.detail;
     const trace = detail.data;
     els.detailContent.innerHTML = `<header class="detail-top"><button class="icon-button" data-close-detail aria-label="Fechar detalhe">${icon("x")}</button><div class="detail-top-copy"><span class="eyebrow">Rastro das corridas</span><h2 id="detail-title">${esc(index.user_email || account?.email || detail.userId)}</h2></div>${account ? `<button class="button button--secondary button--compact" data-open-user="${esc(account.key)}">Abrir conta</button>` : ""}</header><div class="detail-body"><div class="toolbar"><select id="trace-detail-hours" class="toolbar-select"><option value="6"${detail.hours === 6 ? " selected" : ""}>Últimas 6 horas</option><option value="24"${detail.hours === 24 ? " selected" : ""}>Últimas 24 horas</option><option value="72"${detail.hours === 72 ? " selected" : ""}>Últimas 72 horas</option><option value="168"${detail.hours === 168 ? " selected" : ""}>Últimos 7 dias</option></select><button class="button button--secondary button--compact" data-reload-trace="${esc(detail.userId)}">${icon("refresh")} Atualizar</button>${trace?.text ? `<button class="button button--secondary button--compact" data-copy-trace="detail">${icon("copy")} Copiar</button><button class="button button--secondary button--compact" data-download-trace="detail">${icon("download")} Baixar</button>` : ""}</div><div class="notice notice--info">${icon("shield")}<span>Este conteúdo pode conter informações sensíveis (endereços, passageiros). Use apenas para investigar a leitura.</span></div>${detail.loading ? loadingState("Costurando os lotes em ordem cronológica…") : ""}${detail.error ? errorState(detail.error) : ""}${trace ? `<div class="detail-metrics"><div class="detail-metric"><small>Lotes</small><strong>${count(trace.batches)}</strong></div><div class="detail-metric"><small>Bytes descartados</small><strong>${bytes(trace.skipped_bytes)}</strong></div><div class="detail-metric"><small>Intervalo</small><strong>${count(detail.hours)}h</strong></div></div>${trace.text ? `<div class="log-box" style="max-height:calc(100dvh - 16.875rem)"><pre>${esc(trace.text)}</pre></div>` : emptyState("Sem eventos no intervalo", "Nenhum lote foi recebido neste período.", "terminal")}` : ""}</div>`;
+  }
+
+  /* Indicações (Indique e ganhe) ---------------------------------------- */
+  /* Quem indicou, quantos entraram com cada código e o que cada lado ganhou.
+     Só leitura: as regras e as concessões ficam no servidor (20261106120000),
+     e esta página lê admin_referral_overview (20261106130000). */
+  function loadReferrals(options = {}) {
+    return loadResource("referrals", () => rpc("admin_referral_overview", {}), (result) => {
+      if (result?.success === false) throw new Error("Sem permissão para consultar as indicações.");
+      state.referrals = result;
+    }, options);
+  }
+
+  const REFERRAL_REWARDS = {
+    license: ["7 dias no acesso", "green"],
+    play: ["Cobrança da Play adiada", "blue"],
+    play_pending: ["Adiamento pendente", "yellow"],
+    lifetime: ["Vitalício (só conta)", "purple"]
+  };
+
+  function referralRewardPill(kind) {
+    const [label, tone] = REFERRAL_REWARDS[kind] || [kind || "—", "neutral"];
+    return pill(label, tone);
+  }
+
+  /* A situação de quem entrou com o código, do ponto de vista do negócio. */
+  function referredStatus(row, now = state.referrals?.server_ms || Date.now()) {
+    if (!row.referred_user_id) return pill("Conta excluída", "neutral");
+    if (row.referred_subscribed) return pill("Assinou", "green");
+    if (row.referred_lifetime || asNumber(row.referred_expiry_ms) > now) {
+      const until = asNumber(row.referred_expiry_ms);
+      return pill(until ? `Com acesso até ${dateOnly(until)}` : "Com acesso", "blue");
+    }
+    return pill("Dias acabaram", "yellow");
+  }
+
+  function referralMatches(text, ...values) {
+    const query = text.trim().toLowerCase();
+    if (!query) return true;
+    const digits = onlyDigits(query);
+    return values.some((value) => {
+      const raw = String(value ?? "").toLowerCase();
+      return raw.includes(query) || (digits.length >= 4 && onlyDigits(raw).includes(digits));
+    });
+  }
+
+  function referralPerson(row, side) {
+    return {
+      user_id: row[`${side}_user_id`],
+      name: row[`${side}_name`],
+      email: row[`${side}_email`] || (row[`${side}_user_id`] ? "" : "Conta excluída"),
+      phone: row[`${side}_phone`]
+    };
+  }
+
+  function renderReferralResults() {
+    const data = state.referrals || {};
+    const query = state.referralFilter || "";
+    const redemptions = data.redemptions || [];
+    const byReferrer = new Map();
+    redemptions.forEach((row) => {
+      const key = row.referrer_user_id || "";
+      if (!byReferrer.has(key)) byReferrer.set(key, []);
+      byReferrer.get(key).push(row);
+    });
+    const referrers = (data.referrers || []).filter((ref) => referralMatches(query, ref.name, ref.email, ref.phone, ref.code) ||
+      (byReferrer.get(ref.user_id) || []).some((row) => referralMatches(query, row.referred_name, row.referred_email, row.referred_phone)));
+    const recent = redemptions.filter((row) => referralMatches(query, row.referred_name, row.referred_email, row.referred_phone, row.referrer_name, row.referrer_email, row.code));
+
+    const childRows = (rows) => rows.map((row) => `<div class="referral-child">${personCell(referralPerson(row, "referred"))}<span class="people-meta"><span class="cell-primary">${esc(dateTime(row.created_ms))}</span><span class="cell-secondary">Ganhou 7 dias até ${esc(dateOnly(row.referred_until_ms))}</span></span><span class="referral-pills">${referredStatus(row)}${row.referred_internal ? pill("Interna", "purple") : ""}</span>${contactActions(referralPerson(row, "referred"))}</div>`).join("");
+
+    const referrerItems = referrers.map((ref) => {
+      const rows = byReferrer.get(ref.user_id) || [];
+      const rewards = ref.rewards || {};
+      const rewardPills = Object.keys(REFERRAL_REWARDS).filter((kind) => asNumber(rewards[kind]) > 0)
+        .map((kind) => `${referralRewardPill(kind)}${asNumber(rewards[kind]) > 1 ? `<small class="referral-times">×${count(rewards[kind])}</small>` : ""}`).join("");
+      const access = ref.lifetime ? "Vitalício" : asNumber(ref.expiry_ms) ? `Acesso até ${dateOnly(ref.expiry_ms)}` : "Sem acesso";
+      return `<details class="referral-item"${query ? " open" : ""}><summary>
+        <span class="referral-who">${personCell(ref)}</span>
+        <span class="referral-codecell"><span class="referral-code">${esc(ref.code || "—")}</span>${ref.internal ? pill("Interna", "purple") : ""}</span>
+        <span class="referral-count"><strong>${count(ref.referred_count)}</strong><small>${asNumber(ref.referred_count) === 1 ? "indicado" : "indicados"}${asNumber(ref.last_7d) ? ` · ${count(ref.last_7d)} na semana` : ""}</small></span>
+        <span class="referral-count"><strong>${count(ref.converted)}</strong><small>${asNumber(ref.converted) === 1 ? "assinou" : "assinaram"}</small></span>
+        <span class="people-meta"><span class="cell-primary">Última ${esc(relative(ref.last_ms).toLowerCase())}</span><span class="cell-secondary">${esc(access)}</span></span>
+        <span class="referral-pills">${rewardPills}</span>
+        ${contactActions(ref)}
+      </summary><div class="referral-children">${rows.length ? childRows(rows) : plainNotice("Nenhum indicado encontrado.")}</div></details>`;
+    }).join("");
+
+    const visible = recent.slice(0, 150);
+    const recentRows = visible.map((row) => `<div class="referral-row">${personCell(referralPerson(row, "referred"))}<span class="people-meta"><span class="cell-primary">por ${esc(row.referrer_name || row.referrer_email || "conta excluída")}</span><span class="cell-secondary">Código ${esc(row.code)} · ${esc(dateTime(row.created_ms))}</span></span><span class="referral-pills">${referredStatus(row)}${referralRewardPill(row.reward_kind)}</span>${contactActions(referralPerson(row, "referred"))}</div>`).join("");
+
+    return panel("Quem indicou", "Toque numa conta para ver quem entrou com o código dela", referrers.length ? `<div class="referral-list">${referrerItems}</div>` : plainNotice(query ? "Nenhuma conta corresponde à busca." : "Ninguém indicou ainda.", "search")) +
+      `<div style="height:0.9375rem"></div>` +
+      panel("Indicações recentes", "Cada código usado, do mais recente. A pílula da direita é o que a conta que indicou ganhou.", recent.length ? `<div class="referral-list">${recentRows}</div>${recent.length > visible.length ? `<p class="chart-caption">Mostrando ${count(visible.length)} de ${count(recent.length)}. Refine a busca para ver as demais.</p>` : ""}` : plainNotice(query ? "Nenhuma indicação corresponde à busca." : "Nenhum código usado ainda.", "search"));
+  }
+
+  function renderReferrals() {
+    const header = pageHeading("Indique e ganhe", "Quem indicou, quantos entraram com cada código e o que cada lado ganhou. O indicado ganha 7 dias; quem indicou, 7 por amigo (na Play, a próxima cobrança é adiada).");
+    if (!state.referrals && state.loading.referrals) return header + loadingState("Lendo as indicações…");
+    if (state.errors.referrals && !state.referrals) return header + errorState(state.errors.referrals, "referrals");
+    const totals = state.referrals?.totals || {};
+    const total = asNumber(totals.redemptions);
+    const tiles = `<section class="metric-grid${refreshingClass("referrals")}">` +
+      metricCard("Indicações", count(total), `${count(totals.last_7d)} nos últimos 7 dias · ${count(totals.last_30d)} em 30`, "green", "gift") +
+      metricCard("Quem indicou", count(totals.referrers), `${count(totals.codes)} ${asNumber(totals.codes) === 1 ? "conta já abriu" : "contas já abriram"} o próprio código`, "blue", "users") +
+      metricCard("Indicados que assinaram", count(totals.converted), total ? `${pct(totals.converted, total)}% dos indicados · ${count(totals.referred_active)} ainda com acesso` : "Ninguém indicado ainda", "purple", "wallet") +
+      metricCard("Adiamentos pendentes", count(totals.pending_play), asNumber(totals.pending_play) ? "A Play ainda não adiou: tenta de novo quando o indicador abre as Indicações" : "Todas as recompensas aplicadas", asNumber(totals.pending_play) ? "yellow" : "green", "clock") +
+      `</section>`;
+    if (!total) {
+      return header + tiles + emptyState("Nenhuma indicação ainda", "O código aparece para quem abre Indicações no app (versão 257 em diante) e só vale na criação de uma conta nova.", "gift");
+    }
+    const toolbar = `<div class="toolbar"><label class="search-field">${icon("search")}<input id="referral-search" type="search" value="${esc(state.referralFilter)}" placeholder="Buscar por nome, e-mail, telefone ou código…" aria-label="Buscar indicações"></label></div>`;
+    return header + tiles + toolbar + `<div id="referral-results">${renderReferralResults()}</div>`;
   }
 
   /* Travamentos (Android vitals) ----------------------------------------- */
@@ -4294,7 +4412,7 @@
     const providerInput = state.page === "assistant" && state.ai.tab === "connection" ? $("ai-provider-key") : null;
     const providerFocused = providerInput && active === providerInput;
     const aiFocus = state.page === "assistant" && active?.matches("[data-ai-field]") ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
-    const renderers = { overview: renderOverview, growth: renderGrowth, sales: renderSales, adoption: renderAdoption, users: renderUsers, diagnostics: renderDiagnostics, traces: renderTraces, vitals: renderVitals, news: renderNews, assistant: renderAiAssistant, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
+    const renderers = { overview: renderOverview, growth: renderGrowth, sales: renderSales, adoption: renderAdoption, users: renderUsers, referrals: renderReferrals, diagnostics: renderDiagnostics, traces: renderTraces, vitals: renderVitals, news: renderNews, assistant: renderAiAssistant, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
     els.page.innerHTML = renderers[state.page]?.() || "";
     if (providerInput && $("ai-provider-key")) {
       providerInput.disabled = state.ai.providerSaving;
@@ -4320,7 +4438,7 @@
   }
 
   function retryResource(resource) {
-    const loaders = { growth: loadGrowth, sales: loadSales, adoption: loadAdoption, devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, vitals: loadVitals, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
+    const loaders = { growth: loadGrowth, sales: loadSales, adoption: loadAdoption, referrals: loadReferrals, devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, vitals: loadVitals, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
     loaders[resource]?.();
   }
 
@@ -4393,6 +4511,10 @@
     if (event.target.id === "diagnostic-search") {
       state.diagnosticFilter.search = event.target.value;
       const results = $("diagnostic-results"); if (results) results.innerHTML = renderDiagnosticResults();
+    }
+    if (event.target.id === "referral-search") {
+      state.referralFilter = event.target.value;
+      const results = $("referral-results"); if (results) results.innerHTML = renderReferralResults();
     }
     if (event.target.id === "trace-search") {
       state.traceFilter = event.target.value;
