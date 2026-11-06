@@ -53,6 +53,8 @@
     news: null,
     referrals: null,
     referralFilter: "",
+    referralTab: "ranking",
+    referralOpen: new Set(),
     period: storedPeriod(),
     growth: null,
     sales: null,
@@ -2067,8 +2069,15 @@
 
   /* Indicações (Indique e ganhe) ---------------------------------------- */
   /* Quem indicou, quantos entraram com cada código e o que cada lado ganhou.
-     Só leitura: as regras e as concessões ficam no servidor (20261106120000),
-     e esta página lê admin_referral_overview (20261106130000). */
+     As regras e as concessões ficam no servidor (20261106120000); esta página
+     lê admin_referral_overview e cancela por admin_cancel_referral
+     (20261106130000 e 20261106140000).
+
+     Três abas, uma pergunta cada: quem traz gente (Ranking), quem entrou
+     (Indicados) e o que foi anulado (Canceladas). Uma etiqueta por linha — a
+     situação de quem entrou; o resto é texto, para a tabela ler em linha. */
+  const REFERRAL_TABS = [["ranking", "Ranking", "trending"], ["referred", "Indicados", "users"], ["cancelled", "Canceladas", "x"]];
+
   function loadReferrals(options = {}) {
     return loadResource("referrals", () => rpc("admin_referral_overview", {}), (result) => {
       if (result?.success === false) throw new Error("Sem permissão para consultar as indicações.");
@@ -2076,32 +2085,30 @@
     }, options);
   }
 
+  /* O que a conta que indicou ganhou, em texto (sem etiqueta). */
   const REFERRAL_REWARDS = {
-    license: ["7 dias no acesso", "green"],
-    play: ["Cobrança da Play adiada", "blue"],
-    play_pending: ["Adiamento pendente", "yellow"],
-    lifetime: ["Vitalício (só conta)", "purple"]
+    license: "7 dias no acesso",
+    play: "cobrança da Play adiada",
+    play_pending: "adiamento na Play pendente",
+    lifetime: "vitalício (só conta)"
   };
 
-  function referralRewardPill(kind) {
-    const [label, tone] = REFERRAL_REWARDS[kind] || [kind || "—", "neutral"];
-    return pill(label, tone);
+  function shortDate(ms) {
+    return asNumber(ms) > 0 ? new Date(asNumber(ms)).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—";
   }
 
-  /* A situação de quem entrou com o código, do ponto de vista do negócio. */
-  function referredStatus(row, now = state.referrals?.server_ms || Date.now()) {
-    if (row.cancelled_ms) return pill("Cancelada", "red");
-    if (!row.referred_user_id) return pill("Conta excluída", "neutral");
-    if (row.referred_subscribed) return pill("Assinou", "green");
-    if (row.referred_lifetime || asNumber(row.referred_expiry_ms) > now) {
-      const until = asNumber(row.referred_expiry_ms);
-      return pill(until ? `Com acesso até ${dateOnly(until)}` : "Com acesso", "blue");
-    }
-    return pill("Dias acabaram", "yellow");
+  /* A situação de quem entrou com o código: [rótulo, tom, linha de apoio]. */
+  function referredState(row, now = state.referrals?.server_ms || Date.now()) {
+    if (row.cancelled_ms) return ["Cancelada", "red", `em ${shortDate(row.cancelled_ms)}`];
+    if (!row.referred_user_id) return ["Conta excluída", "neutral", ""];
+    if (row.referred_subscribed) return ["Assinou", "green", "assinatura na Play"];
+    if (row.referred_lifetime) return ["Vitalício", "purple", ""];
+    if (asNumber(row.referred_expiry_ms) > now) return ["Período grátis", "blue", `até ${shortDate(row.referred_expiry_ms)}`];
+    return ["Dias acabaram", "yellow", row.referred_expiry_ms ? `em ${shortDate(row.referred_expiry_ms)}` : ""];
   }
 
   function referralMatches(text, ...values) {
-    const query = text.trim().toLowerCase();
+    const query = String(text || "").trim().toLowerCase();
     if (!query) return true;
     const digits = onlyDigits(query);
     return values.some((value) => {
@@ -2126,10 +2133,14 @@
     return contactActions(person).replace(/<\/span>$/, `${cancel}</span>`);
   }
 
-  /* A linha de apoio: quando ganhou os dias, ou quando e por que foi cancelada. */
-  function referralWhen(row, prefix = "") {
-    if (row.cancelled_ms) return `Cancelada ${esc(dateOnly(row.cancelled_ms))}${row.cancel_reason ? `: ${esc(row.cancel_reason)}` : ""}`;
-    return `${prefix}Ganhou 7 dias até ${esc(dateOnly(row.referred_until_ms))}`;
+  function referralStatusCell(row) {
+    const [label, tone, sub] = referredState(row);
+    return `${pill(label, tone)}${sub ? `<span class="cell-secondary ref-status-sub">${esc(sub)}</span>` : ""}`;
+  }
+
+  /* Pessoa com o selo discreto de conta interna, sem virar etiqueta. */
+  function referralPersonCell(person, internal) {
+    return internal ? personCell({ ...person, email: `${person.email || ""} · interna` }) : personCell(person);
   }
 
   async function cancelReferral(id) {
@@ -2172,64 +2183,138 @@
     }
   }
 
-  function renderReferralResults() {
+  /* As linhas de cada aba, já filtradas pela busca. */
+  function referralLists() {
     const data = state.referrals || {};
     const query = state.referralFilter || "";
-    const redemptions = data.redemptions || [];
+    const all = data.redemptions || [];
     const byReferrer = new Map();
-    redemptions.forEach((row) => {
+    all.forEach((row) => {
+      if (row.cancelled_ms) return;
       const key = row.referrer_user_id || "";
       if (!byReferrer.has(key)) byReferrer.set(key, []);
       byReferrer.get(key).push(row);
     });
-    const referrers = (data.referrers || []).filter((ref) => referralMatches(query, ref.name, ref.email, ref.phone, ref.code) ||
-      (byReferrer.get(ref.user_id) || []).some((row) => referralMatches(query, row.referred_name, row.referred_email, row.referred_phone)));
-    const recent = redemptions.filter((row) => referralMatches(query, row.referred_name, row.referred_email, row.referred_phone, row.referrer_name, row.referrer_email, row.code));
+    const ranking = (data.referrers || []).filter((ref) => asNumber(ref.referred_count) > 0).map((ref, index) => ({ ...ref, position: index + 1, rows: byReferrer.get(ref.user_id) || [] }))
+      .filter((ref) => referralMatches(query, ref.name, ref.email, ref.phone, ref.code) ||
+        ref.rows.some((row) => referralMatches(query, row.referred_name, row.referred_email, row.referred_phone)));
+    const match = (row) => referralMatches(query, row.referred_name, row.referred_email, row.referred_phone, row.referrer_name, row.referrer_email, row.code, row.cancel_reason);
+    return {
+      ranking,
+      referred: all.filter((row) => !row.cancelled_ms && match(row)),
+      cancelled: all.filter((row) => row.cancelled_ms && match(row)),
+      totals: { ranking: (data.referrers || []).filter((ref) => asNumber(ref.referred_count) > 0).length, referred: all.filter((row) => !row.cancelled_ms).length, cancelled: all.filter((row) => row.cancelled_ms).length }
+    };
+  }
 
-    const childRows = (rows) => rows.map((row) => `<div class="referral-child${row.cancelled_ms ? " is-cancelled" : ""}">${personCell(referralPerson(row, "referred"))}<span class="people-meta"><span class="cell-primary">${esc(dateTime(row.created_ms))}</span><span class="cell-secondary">${referralWhen(row)}</span></span><span class="referral-pills">${referredStatus(row)}${row.referred_internal ? pill("Interna", "purple") : ""}</span>${referralActions(row)}</div>`).join("");
+  function referralTabs(totals) {
+    const tabs = REFERRAL_TABS.filter(([id]) => id !== "cancelled" || totals.cancelled > 0);
+    if (!tabs.some(([id]) => id === state.referralTab)) state.referralTab = "ranking";
+    return `<div class="ai-tabs ref-tabs" role="tablist" aria-label="Seções das indicações">${tabs.map(([id, label, iconName]) => {
+      const selected = state.referralTab === id;
+      return `<button type="button" role="tab" data-ref-tab="${id}" aria-selected="${selected}" tabindex="${selected ? 0 : -1}">${icon(iconName)}<span>${esc(label)}</span><span class="ref-tab-count">${count(totals[id])}</span></button>`;
+    }).join("")}</div>`;
+  }
 
-    const referrerItems = referrers.map((ref) => {
-      const rows = byReferrer.get(ref.user_id) || [];
-      const rewards = ref.rewards || {};
-      const rewardPills = Object.keys(REFERRAL_REWARDS).filter((kind) => asNumber(rewards[kind]) > 0)
-        .map((kind) => `${referralRewardPill(kind)}${asNumber(rewards[kind]) > 1 ? `<small class="referral-times">×${count(rewards[kind])}</small>` : ""}`).join("");
-      const access = ref.lifetime ? "Vitalício" : asNumber(ref.expiry_ms) ? `Acesso até ${dateOnly(ref.expiry_ms)}` : "Sem acesso";
-      return `<details class="referral-item"${query ? " open" : ""}><summary>
-        <span class="referral-who">${personCell(ref)}</span>
-        <span class="referral-codecell"><span class="referral-code">${esc(ref.code || "—")}</span>${ref.internal ? pill("Interna", "purple") : ""}</span>
-        <span class="referral-count"><strong>${count(ref.referred_count)}</strong><small>${asNumber(ref.referred_count) === 1 ? "indicado" : "indicados"}${asNumber(ref.last_7d) ? ` · ${count(ref.last_7d)} na semana` : ""}${asNumber(ref.cancelled) ? ` · ${count(ref.cancelled)} ${asNumber(ref.cancelled) === 1 ? "cancelada" : "canceladas"}` : ""}</small></span>
-        <span class="referral-count"><strong>${count(ref.converted)}</strong><small>${asNumber(ref.converted) === 1 ? "assinou" : "assinaram"}</small></span>
-        <span class="people-meta"><span class="cell-primary">Última ${esc(relative(ref.last_ms).toLowerCase())}</span><span class="cell-secondary">${esc(access)}</span></span>
-        <span class="referral-pills">${rewardPills}</span>
-        ${contactActions(ref)}
-      </summary><div class="referral-children">${rows.length ? childRows(rows) : plainNotice("Nenhum indicado encontrado.")}</div></details>`;
+  function referralFooter(shown, total, noun) {
+    return `<footer class="table-footer"><span>${count(shown)} de ${count(total)} ${noun}</span><span>Atualizado ${state.lastUpdated ? relative(state.lastUpdated, Date.now()).toLowerCase() : "agora"}</span></footer>`;
+  }
+
+  /* Ranking: quem trouxe mais gente. A linha abre a lista de quem entrou. */
+  function renderReferralRanking(list, total) {
+    if (!list.length) return `<div class="table-card">${emptyState("Nenhuma conta encontrada", state.referralFilter ? "Ajuste a busca." : "Ninguém indicou ainda.", "search")}</div>`;
+    const open = state.referralOpen;
+    const nested = (rows) => rows.length ? `<div class="ref-nested">${rows.map((row) => `<div class="ref-nested-row">${personCell(referralPerson(row, "referred"))}<span class="ref-nested-date">${esc(dateTime(row.created_ms))}</span><span class="ref-nested-status">${referralStatusCell(row)}</span>${referralActions(row)}</div>`).join("")}</div>` : plainNotice("Nenhum indicado encontrado.");
+    const rows = list.map((ref) => {
+      const expanded = open.has(ref.user_id);
+      return `<tr tabindex="0" data-action="ref-toggle" data-ref-toggle="${esc(ref.user_id)}" aria-expanded="${expanded}" class="${expanded ? "is-open" : ""}">
+        <td><span class="ref-rank${ref.position <= 3 ? ` ref-rank--${ref.position}` : ""}">${count(ref.position)}</span></td>
+        <td>${referralPersonCell(ref, ref.internal)}</td>
+        <td><span class="ref-code">${esc(ref.code || "—")}</span></td>
+        <td class="ref-num"><span class="cell-metric">${count(ref.referred_count)}</span><span class="cell-secondary">${asNumber(ref.last_7d) ? `+${count(ref.last_7d)} na semana` : "&nbsp;"}</span></td>
+        <td class="ref-num"><span class="cell-metric">${count(ref.converted)}</span><span class="cell-secondary">${pct(ref.converted, ref.referred_count)}%</span></td>
+        <td><span class="cell-primary">${esc(relative(ref.last_ms))}</span><span class="cell-secondary">${esc(dateTime(ref.last_ms))}</span></td>
+        <td class="cell-actions"><span class="row-arrow ref-chevron">${icon("chevron-down")}</span></td>
+      </tr>${expanded ? `<tr class="ref-expand"><td colspan="7">${nested(ref.rows)}</td></tr>` : ""}`;
     }).join("");
+    const cards = list.map((ref) => {
+      const expanded = open.has(ref.user_id);
+      return `<article class="mobile-data-card ref-card${expanded ? " is-open" : ""}">
+        <button class="ref-card-head" type="button" data-ref-toggle="${esc(ref.user_id)}" aria-expanded="${expanded}"><span class="ref-rank${ref.position <= 3 ? ` ref-rank--${ref.position}` : ""}">${count(ref.position)}</span>${referralPersonCell(ref, ref.internal)}<span class="row-arrow ref-chevron">${icon("chevron-down")}</span></button>
+        <span class="ref-card-stats"><span><small>Código</small><strong class="ref-code">${esc(ref.code || "—")}</strong></span><span><small>Indicados</small><strong>${count(ref.referred_count)}</strong></span><span><small>Assinaram</small><strong>${count(ref.converted)}</strong></span></span>
+        <span class="ref-card-foot">Última indicação ${esc(relative(ref.last_ms).toLowerCase())}</span>
+        ${expanded ? nested(ref.rows) : ""}
+      </article>`;
+    }).join("");
+    return `<div class="table-card"><table class="data-table ref-table"><colgroup><col style="width:6%"><col style="width:31%"><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:19%"><col style="width:6%"></colgroup><thead><tr><th>#</th><th>Conta</th><th>Código</th><th>Indicados</th><th>Assinaram</th><th>Última indicação</th><th></th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-card-list">${cards}</div>${referralFooter(list.length, total, total === 1 ? "conta" : "contas")}</div>`;
+  }
 
-    const visible = recent.slice(0, 150);
-    const recentRows = visible.map((row) => `<div class="referral-row${row.cancelled_ms ? " is-cancelled" : ""}">${personCell(referralPerson(row, "referred"))}<span class="people-meta"><span class="cell-primary">por ${esc(row.referrer_name || row.referrer_email || "conta excluída")}</span><span class="cell-secondary">Código ${esc(row.code)} · ${esc(dateTime(row.created_ms))}${row.cancelled_ms ? ` · ${referralWhen(row)}` : ""}</span></span><span class="referral-pills">${referredStatus(row)}${row.cancelled_ms ? "" : referralRewardPill(row.reward_kind)}</span>${referralActions(row)}</div>`).join("");
+  /* Indicados: cada código usado, do mais recente. */
+  function renderReferralReferred(list, total) {
+    if (!list.length) return `<div class="table-card">${emptyState("Nenhuma indicação encontrada", state.referralFilter ? "Ajuste a busca." : "Nenhum código usado ainda.", "search")}</div>`;
+    const visible = list.slice(0, 300);
+    const rows = visible.map((row) => `<tr>
+        <td>${referralPersonCell(referralPerson(row, "referred"), row.referred_internal)}</td>
+        <td><span class="cell-primary">${esc(row.referrer_name || row.referrer_email || "Conta excluída")}</span><span class="cell-secondary"><span class="ref-code ref-code--sm">${esc(row.code)}</span> ${esc(REFERRAL_REWARDS[row.reward_kind] || "")}</span></td>
+        <td><span class="cell-primary">${esc(shortDate(row.created_ms))}</span><span class="cell-secondary">${esc(relative(row.created_ms))}</span></td>
+        <td>${referralStatusCell(row)}</td>
+        <td class="cell-actions">${referralActions(row)}</td>
+      </tr>`).join("");
+    const cards = visible.map((row) => {
+      const [label, tone, sub] = referredState(row);
+      return `<article class="mobile-data-card ref-card">
+        <span class="ref-card-head">${referralPersonCell(referralPerson(row, "referred"), row.referred_internal)}${pill(label, tone)}</span>
+        <span class="ref-card-stats ref-card-stats--two"><span><small>Indicado por</small><strong>${esc(row.referrer_name || row.referrer_email || "Conta excluída")}</strong></span><span><small>Código</small><strong class="ref-code">${esc(row.code)}</strong></span></span>
+        <span class="ref-card-foot"><span>${esc(shortDate(row.created_ms))}${sub ? ` · ${esc(sub)}` : ""}</span>${referralActions(row)}</span>
+      </article>`;
+    }).join("");
+    return `<div class="table-card"><table class="data-table ref-table"><colgroup><col style="width:30%"><col style="width:25%"><col style="width:13%"><col style="width:17%"><col style="width:15%"></colgroup><thead><tr><th>Indicado</th><th>Indicado por</th><th>Data</th><th>Situação</th><th></th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-card-list">${cards}</div>${referralFooter(visible.length, total, total === 1 ? "indicação" : "indicações")}</div>`;
+  }
 
-    return panel("Quem indicou", "Toque numa conta para ver quem entrou com o código dela", referrers.length ? `<div class="referral-list">${referrerItems}</div>` : plainNotice(query ? "Nenhuma conta corresponde à busca." : "Ninguém indicou ainda.", "search")) +
-      `<div style="height:0.9375rem"></div>` +
-      panel("Indicações recentes", "Cada código usado, do mais recente. A pílula da direita é o que a conta que indicou ganhou; o X cancela uma indicação fraudada.", recent.length ? `<div class="referral-list">${recentRows}</div>${recent.length > visible.length ? `<p class="chart-caption">Mostrando ${count(visible.length)} de ${count(recent.length)}. Refine a busca para ver as demais.</p>` : ""}` : plainNotice(query ? "Nenhuma indicação corresponde à busca." : "Nenhum código usado ainda.", "search"));
+  /* Canceladas: o que foi anulado, por quem e por quê. */
+  function renderReferralCancelled(list, total) {
+    if (!list.length) return `<div class="table-card">${emptyState("Nenhuma cancelada encontrada", "Ajuste a busca.", "search")}</div>`;
+    const rows = list.map((row) => `<tr>
+        <td>${personCell(referralPerson(row, "referred"))}</td>
+        <td><span class="cell-primary">${esc(row.referrer_name || row.referrer_email || "Conta excluída")}</span><span class="cell-secondary"><span class="ref-code ref-code--sm">${esc(row.code)}</span></span></td>
+        <td><span class="cell-primary">${esc(shortDate(row.cancelled_ms))}</span><span class="cell-secondary">${esc(row.cancelled_by_email || "")}</span></td>
+        <td><span class="ref-reason">${esc(row.cancel_reason || "—")}</span></td>
+      </tr>`).join("");
+    const cards = list.map((row) => `<article class="mobile-data-card ref-card">
+        <span class="ref-card-head">${personCell(referralPerson(row, "referred"))}${pill("Cancelada", "red")}</span>
+        <span class="ref-reason">${esc(row.cancel_reason || "—")}</span>
+        <span class="ref-card-foot">Por ${esc(row.referrer_name || row.referrer_email || "conta excluída")} · ${esc(row.code)} · cancelada em ${esc(shortDate(row.cancelled_ms))}</span>
+      </article>`).join("");
+    return `<div class="table-card"><table class="data-table ref-table"><colgroup><col style="width:28%"><col style="width:22%"><col style="width:18%"><col style="width:32%"></colgroup><thead><tr><th>Indicado</th><th>Indicado por</th><th>Cancelada</th><th>Motivo</th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-card-list">${cards}</div>${referralFooter(list.length, total, total === 1 ? "cancelada" : "canceladas")}</div>`;
+  }
+
+  function renderReferralResults() {
+    const lists = referralLists();
+    if (state.referralTab === "referred") return renderReferralReferred(lists.referred, lists.totals.referred);
+    if (state.referralTab === "cancelled") return renderReferralCancelled(lists.cancelled, lists.totals.cancelled);
+    return renderReferralRanking(lists.ranking, lists.totals.ranking);
   }
 
   function renderReferrals() {
-    const header = pageHeading("Indique e ganhe", "Quem indicou, quantos entraram com cada código e o que cada lado ganhou. O indicado ganha 7 dias; quem indicou, 7 por amigo (na Play, a próxima cobrança é adiada).");
+    const header = pageHeading("Indique e ganhe", "O indicado ganha 7 dias; quem indicou, 7 por amigo.");
     if (!state.referrals && state.loading.referrals) return header + loadingState("Lendo as indicações…");
     if (state.errors.referrals && !state.referrals) return header + errorState(state.errors.referrals, "referrals");
     const totals = state.referrals?.totals || {};
     const total = asNumber(totals.redemptions);
     const tiles = `<section class="metric-grid${refreshingClass("referrals")}">` +
-      metricCard("Indicações", count(total), `${count(totals.last_7d)} nos últimos 7 dias · ${count(totals.last_30d)} em 30${asNumber(totals.cancelled) ? ` · ${count(totals.cancelled)} ${asNumber(totals.cancelled) === 1 ? "cancelada" : "canceladas"}` : ""}`, "green", "gift") +
-      metricCard("Quem indicou", count(totals.referrers), `${count(totals.codes)} ${asNumber(totals.codes) === 1 ? "conta já abriu" : "contas já abriram"} o próprio código`, "blue", "users") +
-      metricCard("Indicados que assinaram", count(totals.converted), total ? `${pct(totals.converted, total)}% dos indicados · ${count(totals.referred_active)} ainda com acesso` : "Ninguém indicado ainda", "purple", "wallet") +
-      metricCard("Adiamentos pendentes", count(totals.pending_play), asNumber(totals.pending_play) ? "A Play ainda não adiou: tenta de novo quando o indicador abre as Indicações" : "Todas as recompensas aplicadas", asNumber(totals.pending_play) ? "yellow" : "green", "clock") +
+      metricCard("Indicações", count(total), asNumber(totals.last_7d) ? `+${count(totals.last_7d)} nesta semana` : "nenhuma nesta semana", "green", "gift") +
+      metricCard("Quem indicou", count(totals.referrers), `de ${count(totals.codes)} com código`, "blue", "users") +
+      metricCard("Assinaram", count(totals.converted), total ? `${pct(totals.converted, total)}% dos indicados` : "—", "purple", "wallet") +
+      metricCard("No período grátis", count(totals.referred_active), "indicados com os 7 dias", "yellow", "clock") +
       `</section>`;
+    const pending = asNumber(totals.pending_play);
+    const notice = pending ? `<div class="notice notice--warning ref-notice">${icon("alert")}<span>${count(pending)} ${pending === 1 ? "adiamento" : "adiamentos"} na Play ainda por fazer. O servidor tenta de novo quando quem indicou abre Indicações no app.</span></div>` : "";
     if (!total && !asNumber(totals.cancelled)) {
       return header + tiles + emptyState("Nenhuma indicação ainda", "O código aparece para quem abre Indicações no app (versão 257 em diante) e só vale na criação de uma conta nova.", "gift");
     }
-    const toolbar = `<div class="toolbar"><label class="search-field">${icon("search")}<input id="referral-search" type="search" value="${esc(state.referralFilter)}" placeholder="Buscar por nome, e-mail, telefone ou código…" aria-label="Buscar indicações"></label></div>`;
-    return header + tiles + toolbar + `<div id="referral-results">${renderReferralResults()}</div>`;
+    const lists = referralLists();
+    const toolbar = `<div class="ref-toolbar">${referralTabs(lists.totals)}<label class="search-field">${icon("search")}<input id="referral-search" type="search" value="${esc(state.referralFilter)}" placeholder="Nome, e-mail, telefone ou código" aria-label="Buscar indicações por nome, e-mail, telefone ou código"></label></div>`;
+    return header + tiles + notice + toolbar + `<div id="referral-results">${renderReferralResults()}</div>`;
   }
 
   /* Travamentos (Android vitals) ----------------------------------------- */
@@ -4509,6 +4594,13 @@
     if (target.dataset.growthStage) { state.growthStage = target.dataset.growthStage; return renderCurrentPage(); }
     if (target.dataset.openUserId) return openUserById(target.dataset.openUserId);
     if (target.dataset.cancelReferral) return cancelReferral(target.dataset.cancelReferral);
+    if (target.dataset.refTab) { state.referralTab = target.dataset.refTab; return renderCurrentPage(); }
+    if (target.dataset.refToggle) {
+      const id = target.dataset.refToggle;
+      if (state.referralOpen.has(id)) state.referralOpen.delete(id); else state.referralOpen.add(id);
+      const results = $("referral-results"); if (results) results.innerHTML = renderReferralResults();
+      return;
+    }
     if (target.dataset.nav) {
       if (target.dataset.nav === "growth") state.growthStage = target.dataset.stage || "all";
       return setPage(target.dataset.nav);
