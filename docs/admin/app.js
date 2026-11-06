@@ -1911,7 +1911,7 @@
   /* Uso e adoção --------------------------------------------------------- */
   const EVENT_LABELS = {
     accept_shown: "Janela de aceite exibida", accept_tapped: "Aceitar tocado", accept_dismissed: "Janela dispensada", accept_expired: "Janela expirada",
-    home_entry_tapped: "Atalho de entrada", home_expense_tapped: "Atalho de saída", home_statement_tapped: "Atalho de extrato", home_addresses_tapped: "Atalho de endereços", home_pix_tapped: "Atalho de Pix", home_share_tapped: "Atalho de compartilhar",
+    home_entry_tapped: "Atalho de entrada", home_expense_tapped: "Atalho de saída", home_statement_tapped: "Atalho de extrato", home_addresses_tapped: "Atalho de endereços", home_pix_tapped: "Atalho de Pix", home_share_tapped: "Atalho de compartilhar", home_referrals_tapped: "Atalho de indicações",
     ride_accepted: "Corrida aceita", ride_finished: "Corrida finalizada", ride_rejected: "Corrida recusada", ride_canceled: "Corrida cancelada", ride_missed: "Corrida perdida"
   };
 
@@ -3005,8 +3005,8 @@
      NovidadesCatalogo.IMAGENS_EMBUTIDAS: um nome fora dela o app ignora. As
      cópias em ./assets servem só para a prévia deste painel. */
   const NEWS_BUILTIN = {
-    card: [["novidade_whatsapp", "Grupo do WhatsApp"], ["novidade_1", "Gravação Secreta"], ["novidade_2", "Captura de Tela"], ["novidade_4", "QR Pix"]],
-    guide: [["guia_novidade_whatsapp", "Guia do grupo do WhatsApp"], ["guia_novidade_gravacao", "Guia da Gravação Secreta"], ["guia_novidade_captura", "Guia da Captura de Tela"], ["guia_novidade_pix", "Guia do QR Pix"]]
+    card: [["novidade_indique", "Indique e ganhe"], ["novidade_whatsapp", "Grupo do WhatsApp"], ["novidade_1", "Gravação Secreta"], ["novidade_2", "Captura de Tela"], ["novidade_4", "QR Pix"]],
+    guide: [["guia_novidade_indique", "Guia do Indique e ganhe"], ["guia_novidade_whatsapp", "Guia do grupo do WhatsApp"], ["guia_novidade_gravacao", "Guia da Gravação Secreta"], ["guia_novidade_captura", "Guia da Captura de Tela"], ["guia_novidade_pix", "Guia do QR Pix"]]
   };
   const NEWS_SLOTS = {
     card: { field: "card_image", label: "Imagem do card", ratio: 4 / 3, ratioLabel: "4:3, paisagem", size: "1448 × 1086" },
@@ -3177,7 +3177,7 @@
         <h3>Janela que o card abre</h3>
         ${newsImagePicker("guide")}
         ${newsField("guide_description", "Descrição da imagem", item.guide_description, { textarea: true, maxlength: 1200, hint: "O passo a passo da imagem em texto. O TalkBack lê isto, e a janela mostra este texto se a imagem não carregar." })}
-        ${newsField("button_url", "Link do botão", item.button_url, { type: "url", maxlength: 2048, placeholder: "https://…", hint: "Opcional, só https. Com link aparece um botão embaixo da imagem que o abre; sem link, a janela é só a imagem e o X." })}
+        ${newsField("button_url", "Link do botão", item.button_url, { maxlength: 2048, placeholder: "https://…", hint: "Opcional: um link https, ou app:indicacoes para abrir a janela de Indicações do app (257+). Com link aparece um botão embaixo da imagem; sem link, a janela é só a imagem e o X." })}
         ${newsField("button_label", "Texto do botão", item.button_label, { maxlength: 40, placeholder: item.button_url ? "Abrir" : "Entendi" })}
       </section>
       <section class="detail-section">
@@ -3215,7 +3215,7 @@
     const item = newsFields(detail.item);
     Object.keys(item).forEach((key) => { if (typeof item[key] === "string") item[key] = item[key].trim(); });
     if (!item.card_title) return showNewsError("Informe o título do card.");
-    if (item.button_url && !/^https:\/\/\S+$/i.test(item.button_url)) return showNewsError("O link precisa começar com https:// e não pode ter espaços.");
+    if (item.button_url && !/^(https:\/\/\S+|app:indicacoes)$/i.test(item.button_url)) return showNewsError("O link precisa começar com https:// (sem espaços) ou ser app:indicacoes.");
     item.title = item.title || item.card_title;
     item.button_label = item.button_label || (item.button_url ? "Abrir" : "Entendi");
     item.min_app_version = Math.max(0, Math.floor(asNumber(item.min_app_version)));
