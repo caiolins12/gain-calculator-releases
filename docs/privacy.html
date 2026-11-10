@@ -17,7 +17,7 @@
             <p class="eyebrow">Gain Calculator</p>
             <h1>Política de Privacidade</h1>
             <p class="subtitle">Como tratamos seus dados no Gain Calculator</p>
-            <p class="meta">Versão 16 &middot; Vigente desde 6 de novembro de 2026</p>
+            <p class="meta">Versão 17 &middot; Vigente desde 10 de novembro de 2026</p>
         </header>
 
         <section class="legal-section">
@@ -82,7 +82,7 @@ A leitura das solicitações é CONTÍNUA: ela não depende do botão de monitor
 A leitura acontece por dois caminhos, que se complementam:
 
 • Árvore de acessibilidade: o app consulta a janela do aplicativo de transporte para ler os textos da solicitação de corrida (preço, distância, tempo, avaliação e nome do passageiro, endereços).
-• Foto da tela tirada pelo próprio serviço de acessibilidade: quando o aplicativo de transporte desenha a solicitação como imagem e não há texto para ler, o serviço pede ao sistema uma imagem da tela e faz o reconhecimento óptico dela. O app NÃO usa a permissão de projeção de mídia (compartilhamento de tela) — não há pedido de "gravar ou transmitir a tela" e não aparece o ícone de transmissão no seu aparelho.
+• Foto da tela tirada pelo próprio serviço de acessibilidade: quando o aplicativo de transporte desenha a solicitação como imagem e não há texto para ler, o serviço pede ao sistema uma imagem da tela e faz o reconhecimento óptico dela. A leitura NÃO usa a permissão de projeção de mídia (compartilhamento de tela) — ler as solicitações não depende de nenhum pedido de "gravar ou transmitir a tela". Essa permissão só é pedida pela Gravação de Tela (seção 9), quando você toca nela.
 
 Em ambos os casos, o reconhecimento de texto roda LOCALMENTE no seu dispositivo (Google ML Kit on-device). As imagens da sua tela não são enviadas para nossos servidores nem para terceiros, e são descartadas da memória logo após o reconhecimento. Apenas os dados estruturados da corrida (preço, distância, endereços, nome do passageiro) podem ser sincronizados na sua conta, se você estiver autenticado.
 
@@ -156,8 +156,8 @@ Contas da fase anterior do programa — as que entraram digitando um código de 
         </section>
 
         <section class="legal-section">
-            <h2>9. Recursos opcionais de câmera e microfone</h2>
-            <p>O app oferece, como recurso opcional que só funciona quando você o aciona, a gravação de vídeo com áudio, para registro local pelo próprio motorista.
+            <h2>9. Recursos opcionais de câmera, microfone e gravação de tela</h2>
+            <p>O app oferece, como recursos opcionais que só funcionam quando você os aciona, a gravação de vídeo pela câmera, com áudio, e a gravação da tela do aparelho, sem áudio, ambas para registro local pelo próprio motorista.
 
 O que a gravação pode incluir:
 • A câmera FRONTAL, que filma o interior do veículo — você e quem estiver no carro.
@@ -169,7 +169,9 @@ Onde os arquivos ficam: gravados em MP4 e salvos apenas na biblioteca de mídia 
 
 Quem responde pelo conteúdo: a gravação registra imagem e voz de outras pessoas — passageiros, pedestres, outros motoristas. Em relação a esse material, o controlador é VOCÊ: foi você quem decidiu gravar, o arquivo é seu, fica no seu aparelho e só você decide o que fazer com ele. Cabe a você observar a legislação aplicável, informar quem está sendo gravado quando a lei exigir e não usar o material para expor, constranger ou difamar ninguém. As obrigações correspondentes estão na seção 8 dos Termos de Uso.
 
-Enquanto a gravação está ativa, o Android exibe os indicadores de câmera e microfone em uso, e o app mantém uma notificação permanente — não existe gravação silenciosa.</p>
+Gravação de Tela: só começa quando você toca em "Gravação de Tela" no menu do ícone flutuante, e o Android pede a sua autorização a cada gravação ("Gravar a tela?"). Ela grava a tela inteira, sem som — tudo o que aparecer nela enquanto durar: os aplicativos de transporte, as solicitações com nome do passageiro e endereços, notificações e qualquer outro aplicativo que você abrir. Termina quando você toca de novo ou quando a encerra pela notificação ou pelo aviso do Android. O vídeo é salvo em MP4 na mesma pasta "Movies/GainCalculator" e vale para ele tudo o que esta seção diz sobre os vídeos da câmera: fica só no seu aparelho, nós não o recebemos, e o que fazer com ele é decisão e responsabilidade sua. Para não registrar o que não quer, encerre a gravação antes de abrir aplicativos de banco, senhas ou conversas.
+
+Enquanto uma gravação está ativa, o Android exibe os indicadores de câmera e microfone em uso ou o aviso de gravação de tela, e o app mantém uma notificação permanente — não existe gravação silenciosa.</p>
         </section>
 
         <section class="legal-section">
@@ -189,7 +191,7 @@ As notificações de funcionamento não podem ser desligadas sem desligar o recu
 • Não coletamos o seu endereço residencial, comercial ou de cobrança. Os únicos endereços armazenados pelo app são os pontos de embarque e desembarque exibidos nas solicitações de corrida.
 • Não acessamos suas mensagens (SMS/WhatsApp), seu histórico de chamadas nem seus e-mails. A agenda de contatos só é consultada se você pedir ao Gain Copiloto para ligar ou mandar mensagem para alguém e tiver concedido a permissão: a busca acontece no aparelho, na hora do pedido, e a agenda não é enviada a nós nem a terceiros (seção 28).
 • Não navegamos pela sua galeria de fotos. O app ESCREVE nela os arquivos que você pediu — as gravações de vídeo e, se ativado, os prints das solicitações — e só consegue LER a imagem única que você escolher no seletor do Android para a leitura por print (seção 5).
-• Não pedimos a permissão de projeção de mídia (compartilhamento ou gravação da tela). A imagem da tela usada pelo reconhecimento vem do próprio serviço de acessibilidade.
+• A leitura das solicitações não usa a permissão de projeção de mídia (compartilhamento ou gravação da tela): a imagem usada pelo reconhecimento vem do próprio serviço de acessibilidade. Essa permissão só é pedida quando você toca em Gravação de Tela (seção 9), e o vídeo não sai do seu aparelho.
 • Não fotografamos a tela de aplicativos de banco, senhas, saúde, mensageria ou galeria (só a solicitação de corrida desenhada por cima deles, seção 4), e o que a leitura encontra nos outros aplicativos e não é corrida é descartado no aparelho.
 • Não clicamos em botões de outros aplicativos. O monitoramento apenas lê o que aparece na tela — nunca aceita ou recusa corridas em seu nome. As únicas ações fora do app são os comandos que você pede por voz ao Gain Copiloto (seção 28).
 • Não utilizamos plataformas de publicidade, analytics de terceiros nem ferramentas de attribution. O app não exibe anúncios.
@@ -204,7 +206,7 @@ As notificações de funcionamento não podem ser desligadas sem desligar o recu
         <section class="legal-section">
             <h2>13. Bases legais do tratamento</h2>
             <p>• Execução de contrato (art. 7º, V): cadastro, autenticação, licenciamento, sincronização dos seus dados e prestação dos recursos do app.
-• Consentimento (art. 7º, I): leitura da tela durante o monitoramento, gravação por câmera e microfone, captura automática de prints, leitura de um print escolhido por você, envio de relatórios de diagnóstico e rastro do programa de testadores. Todos dependem de permissão que você concede e pode revogar a qualquer momento nos Ajustes do Android ou do próprio app.
+• Consentimento (art. 7º, I): leitura da tela durante o monitoramento, gravação por câmera e microfone, gravação da tela, captura automática de prints, leitura de um print escolhido por você, envio de relatórios de diagnóstico e rastro do programa de testadores. Todos dependem de permissão que você concede e pode revogar a qualquer momento nos Ajustes do Android ou do próprio app.
 • Legítimo interesse (art. 7º, IX): estatísticas de uso para melhoria do serviço, medidas de prevenção a fraude e a uso indevido de licenças, e comunicados de serviço sobre o funcionamento do app.
 • Cumprimento de obrigação legal ou regulatória (art. 7º, II): guarda de registros exigidos por lei.
 
