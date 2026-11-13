@@ -17,7 +17,7 @@
             <p class="eyebrow">Gain Calculator</p>
             <h1>Política de Privacidade</h1>
             <p class="subtitle">Como tratamos seus dados no Gain Calculator</p>
-            <p class="meta">Versão 18 &middot; Vigente desde 11 de novembro de 2026</p>
+            <p class="meta">Versão 19 &middot; Vigente desde 12 de novembro de 2026</p>
         </header>
 
         <section class="legal-section">
@@ -116,16 +116,18 @@ O que é registrado:
 • Tempo de monitoramento: início e duração dos períodos em que você manteve o monitoramento ligado, isto é, o ícone flutuante aberto — a leitura contínua da seção 4 com o ícone fechado não entra. É a medida de uso real do produto — não é tempo de tela do app, porque o motorista usa o Gain com o aplicativo de transporte à frente.
 • Tempo por tela: o nome de cada tela do app (por exemplo, "Relatórios") e o total de milissegundos que ela ficou visível, além do número de vezes que foi aberta.
 • Contadores de eventos: totais de ações relevantes do produto, como quantas vezes a janela de aceite foi exibida, tocada ou dispensada, e quantas corridas foram finalizadas. São apenas nomes de evento e contagens.
+• Uso por dia: os mesmos contadores e tempos de tela, somados por dia do calendário (por exemplo, "Extrato: aberto 3 vezes, 2 minutos, em 12/11"). É o que mostra o que mudou no uso de quem deixou de usar o app.
+• Passos do primeiro acesso: nas contas novas, a data e a hora em que cada etapa da configuração foi concluída pela primeira vez — entrar, confirmar o telefone, aceitar os documentos, conceder as permissões, abrir o ícone flutuante, ter a primeira solicitação lida, concluir a primeira corrida, ver os planos e assinar. Cada passo é registrado uma única vez. É o que mostra em que etapa quem desiste para.
 • Tipo de veículo declarado e versão do app instalada.
 
 O que NÃO é registrado, por decisão de projeto:
-• Nenhum carimbo de hora por evento e nenhuma ordem de navegação. Não é possível reconstruir o que você fez, nem quando, a partir desses dados.
+• Nenhum carimbo de hora por ação e nenhuma ordem de navegação. Fora a primeira vez de cada passo do primeiro acesso, os números são somas do dia: não é possível reconstruir o que você fez em cada momento, nem a sequência de telas que visitou.
 • Nenhum conteúdo de corrida, endereço, nome de passageiro, valor ou texto lido da tela integra as estatísticas de uso.
 • Nenhuma ferramenta de analytics de terceiros. Não usamos Firebase Analytics, Google Analytics, ferramentas de attribution ou SDKs de publicidade. Esses números não saem da nossa infraestrutura e não são vendidos, cedidos ou compartilhados com ninguém.
 
 Finalidade: identificar quais recursos são realmente usados, onde o app falha ou confunde, e priorizar correções e melhorias. Um exemplo concreto do porquê disso importar: sem saber se uma janela é pouco vista ou vista e ignorada, a correção necessária seria escolhida no palpite.
 
-Base legal: legítimo interesse (art. 7º, IX da LGPD) em aprimorar o serviço prestado a você, tratado sempre de forma agregada e limitada ao mínimo necessário. Você pode se opor a esse tratamento a qualquer momento escrevendo para <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a> — o pedido será atendido sem qualquer prejuízo ao seu acesso aos recursos do app.</p>
+Base legal: legítimo interesse (art. 7º, IX da LGPD) em aprimorar o serviço prestado a você, limitado ao mínimo necessário e analisado de forma agregada — ou, para entender por que uma conta deixou de usar o app, conta a conta (seção 16). Você pode se opor a esse tratamento a qualquer momento escrevendo para <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a> — o pedido será atendido sem qualquer prejuízo ao seu acesso aos recursos do app.</p>
         </section>
 
         <section class="legal-section">
@@ -220,12 +222,12 @@ Para os dados de passageiros e terceiros (seção 3), atuamos como operador e o 
 
 • Supabase (Supabase Inc.): provedor de autenticação, banco de dados e funções serverless. Recebe seus dados de cadastro (incluindo número de telefone), hash do dispositivo, dados financeiros e das corridas, estatísticas de uso e configurações sincronizados.
 • Google LLC (Sign in with Google), se você optar por entrar com o Google: a Google sabe que você entrou no Gain Calculator e nos devolve nome, e-mail e o endereço da sua foto de perfil.
-• Serviço de mensageria por WhatsApp/SMS: recebe o seu número de telefone para entregar o código de verificação (OTP) e os comunicados de serviço da seção 17. Utilizamos uma infraestrutura de envio operada por nós, sobre a plataforma WhatsApp. Não compartilhamos com esse canal qualquer outro dado pessoal além do número e do conteúdo da mensagem.
+• Serviço de mensageria por WhatsApp/SMS: recebe o seu número de telefone para entregar o código de verificação (OTP), os comunicados de serviço e a conversa de retorno da seção 17. O envio é feito pela API oficial do WhatsApp Business, da Meta, que também entrega a nós as mensagens que você responde. Não compartilhamos com esse canal qualquer outro dado pessoal além do número e do conteúdo das mensagens.
 • Mercado Pago (Mercado Pago S.A.): processou os pagamentos por Pix e cartão feitos antes da cobrança pela Google Play. Recebeu o valor, o método de pagamento e o e-mail informado por você no checkout.
 • Google LLC (Google ML Kit): biblioteca de reconhecimento de texto. O processamento ocorre localmente no dispositivo; não há envio das imagens da sua tela para a Google.
 • Google LLC (Play Integrity API): para verificar que o app é a versão legítima distribuída pela Play Store e que o aparelho não foi adulterado, o app solicita ao Google um atestado de integridade. A Google recebe sinais técnicos do dispositivo e do aplicativo; nós recebemos apenas o resultado da verificação. Esse mecanismo protege sua licença contra fraude e não coleta dados pessoais seus.
 • Google LLC (Google Play): distribuição do aplicativo e de suas atualizações e cobrança das assinaturas dos planos. A Google processa o pagamento com a forma cadastrada na sua conta Google, sob a política de privacidade dela, e nos informa a situação da assinatura (seção 2).
-• OpenAI (OpenAI, L.L.C., EUA): processa as conversas com a Gain IA e com o Gain Copiloto, e somente quando você usa um dos dois. Recebe os dados do Gain enviados como contexto da pergunta, as mensagens, imagens e áudios que você manda e o texto das respostas faladas, para gerar a voz. Detalhes nas seções 27 e 28.
+• OpenAI (OpenAI, L.L.C., EUA): processa as conversas com a Gain IA e com o Gain Copiloto, e somente quando você usa um dos dois. Recebe os dados do Gain enviados como contexto da pergunta, as mensagens, imagens e áudios que você manda e o texto das respostas faladas, para gerar a voz. Detalhes nas seções 27 e 28. Processa também a conversa de retorno pelo WhatsApp, só se você responder a ela (seção 17).
 • ElevenLabs (Eleven Labs, Inc., EUA): gera a voz premium do Gain Copiloto, só para quem tem o plano Ultra e escolhe uma voz premium. Recebe apenas o texto das respostas que serão faladas e as frases fixas do cartão do Copiloto; não recebe a sua voz nem os dados do Gain usados como contexto. Detalhes na seção 28.
 • Reconhecedor de voz do Android (do Google ou do fabricante do aparelho): transcreve a sua fala quando você usa o Gain Copiloto. Quando o aparelho reconhece a fala no próprio dispositivo, a voz não sai do celular; nos demais, o reconhecedor padrão pode processá-la online, sob a política de privacidade de quem o fornece. Detalhes na seção 28.
 
@@ -234,7 +236,7 @@ Não vendemos seus dados pessoais a terceiros. Não compartilhamos seus dados pa
 
         <section class="legal-section">
             <h2>15. Transferência internacional de dados</h2>
-            <p>Parte da nossa infraestrutura e dos nossos operadores está sediada fora do Brasil. Em particular, os dados sincronizados na sua conta são armazenados em servidores do Supabase, os serviços da Google (autenticação, integridade e distribuição do app) são prestados por empresa estrangeira e as conversas com a Gain IA e com o Gain Copiloto são processadas pela OpenAI, nos Estados Unidos; no plano Ultra, a voz premium das respostas do Copiloto é gerada pela ElevenLabs, também nos Estados Unidos.
+            <p>Parte da nossa infraestrutura e dos nossos operadores está sediada fora do Brasil. Em particular, os dados sincronizados na sua conta são armazenados em servidores do Supabase, os serviços da Google (autenticação, integridade e distribuição do app) são prestados por empresa estrangeira e as conversas com a Gain IA e com o Gain Copiloto são processadas pela OpenAI, nos Estados Unidos; no plano Ultra, a voz premium das respostas do Copiloto é gerada pela ElevenLabs, também nos Estados Unidos. As mensagens de WhatsApp passam pela infraestrutura da Meta.
 
 Essas transferências são realizadas nos termos do art. 33 da LGPD, quando necessárias para a execução do contrato celebrado com você e mediante cláusulas contratuais que obrigam o operador a garantir nível de proteção compatível com o da legislação brasileira. Você pode solicitar informações adicionais sobre essas transferências pelo e-mail <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a>.</p>
         </section>
@@ -243,7 +245,7 @@ Essas transferências são realizadas nos termos do art. 33 da LGPD, quando nece
             <h2>16. Acesso interno e administração</h2>
             <p>Dizemos com todas as letras o que muitas políticas deixam implícito: existem administradores do Gain Calculator que podem consultar dados de contas individuais.
 
-O que esse acesso alcança: o cadastro (nome, e-mail, telefone), o estado da licença e dos pagamentos, os aparelhos vinculados, as estatísticas de uso e — na tela de detalhe de uma conta — números agregados a partir dos dados que você sincroniza, como total de ganhos, corridas registradas e aplicativos de origem.
+O que esse acesso alcança: o cadastro (nome, e-mail, telefone), o estado da licença e dos pagamentos, os aparelhos vinculados, as estatísticas de uso (inclusive por dia e os passos do primeiro acesso, seção 6), as observações anotadas na conta — entre elas, a conversa de retorno e o resumo dela (seção 17) — e — na tela de detalhe de uma conta — números agregados a partir dos dados que você sincroniza, como total de ganhos, corridas registradas e aplicativos de origem.
 
 Para que serve: prestar suporte, investigar falhas relatadas, apurar fraude no uso de licenças e acompanhar a saúde do produto.
 
@@ -266,7 +268,9 @@ Os limites que assumimos:
 
 Mesmo após a recusa, continuaremos enviando as mensagens estritamente necessárias à relação contratual — código de verificação, confirmação de pagamento e avisos legais obrigatórios —, porque sem elas o serviço não funciona.
 
-Base legal: legítimo interesse (art. 7º, IX) para comunicados de serviço, e execução de contrato (art. 7º, V) para as mensagens transacionais.</p>
+Conversa de retorno. Se você deixar de usar o app por alguns dias, ou criar a conta e não chegar a usar a leitura das solicitações, podemos enviar UMA mensagem ao WhatsApp do número verificado perguntando o que aconteceu e o que faria o app ser útil para você. Responder é opcional. Se você responder, quem conversa é a Gain IA, o assistente do app, em poucas mensagens curtas, e a conversa termina logo. Para conduzi-la, a Gain IA recebe as mensagens trocadas, o seu primeiro nome e um resumo do seu uso (há quantos dias usa ou parou, quantas solicitações foram lidas e corridas concluídas, a etapa da configuração em que parou e a situação do seu acesso) — nunca valores, endereços ou dados de passageiros. Áudio que você mandar é transcrito para texto e não é guardado; imagens não são lidas. O motivo que você der e o que faria você voltar ficam anotados na sua conta, junto com a conversa, visíveis só à administração (seção 16), e servem para decidir o que melhorar. Cada situação gera no máximo uma abordagem, com pelo menos 60 dias entre uma e outra. Responda SAIR, ou peça para parar, e não enviamos mais nenhuma mensagem dessas.
+
+Base legal: legítimo interesse (art. 7º, IX) para comunicados de serviço e para a conversa de retorno, e execução de contrato (art. 7º, V) para as mensagens transacionais.</p>
         </section>
 
         <section class="legal-section">
@@ -289,6 +293,8 @@ Nenhum sistema é 100% imune a incidentes. Em caso de incidente de segurança qu
 • Registros de pagamento: pelo prazo exigido pela legislação fiscal e de defesa do consumidor, mesmo após a exclusão da conta, restritos ao mínimo necessário.
 • Indicações: enquanto a conta existir. Excluída a conta, o registro deixa de apontar para ela, e fica apenas o resumo criptográfico do número de telefone de quem usou um código, enquanto o programa Indique e ganhe existir, só para impedir que o mesmo número receba os dias de indicação de novo (prevenção a fraude, seção 13).
 • Dias grátis de boas-vindas: enquanto a conta existir. Excluída a conta, o registro deixa de apontar para ela, e fica apenas o resumo criptográfico do número de telefone, enquanto a oferta existir, só para impedir que o mesmo número resgate os dias de novo (prevenção a fraude, seção 13).
+• Uso por dia: até 13 meses, com apagamento automático. Passos do primeiro acesso: enquanto a conta existir.
+• Conversa de retorno e observações da conta: enquanto a conta existir. O número de quem pediu para não receber mais fica guardado, mesmo depois da exclusão da conta, só para que a recusa continue valendo.
 
 Você pode solicitar a exclusão da conta a qualquer momento pelo próprio app ou pelo canal de contato indicado nesta Política. Após a exclusão, os dados pessoais associados à conta são removidos em prazo razoável (até 30 dias), exceto registros que precisem ser conservados por exigência legal.
 
@@ -300,6 +306,8 @@ Os arquivos que ficam apenas no seu aparelho — vídeos e prints — não são 
             <p>O app classifica cada solicitação de corrida (por exemplo, com um indicador de "boa" ou "ruim") aplicando os parâmetros que VOCÊ configurou — custo de combustível, consumo do veículo, valor mínimo por quilômetro e por hora.
 
 Essa classificação é uma sugestão de cálculo exibida a você, e nada mais: quem aceita ou recusa a corrida é você, o app não age em seu nome, e o resultado não é comunicado a nenhuma plataforma, empregador ou terceiro.
+
+Na conversa de retorno (seção 17), a Gain IA resume as suas respostas e classifica o motivo que você deu. Esse resumo orienta melhorias do produto e não muda nada no seu acesso, no seu plano ou no preço que você paga.
 
 Não realizamos tratamento automatizado que defina perfil pessoal, de crédito, de consumo ou de personalidade, nem decisão automatizada que produza efeitos jurídicos sobre você. Ainda assim, o direito de revisão previsto no art. 20 da LGPD está assegurado: escreva para <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a> e explicaremos a lógica do cálculo.</p>
         </section>
