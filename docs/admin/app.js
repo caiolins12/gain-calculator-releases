@@ -1609,7 +1609,7 @@
       ? `<p class="wb-sub">Próximos a receber</p><div class="wb-queue">${next.slice(0, 10).map((row) => `<button class="wb-next" type="button" data-open-user-id="${esc(row.user_id)}" title="Abrir a conta"><span class="avatar">${esc(initials(row.name, row.email))}</span><span><strong>${esc(shortName(row))}</strong><small>${row.kind === "parou" ? `parou há ${count(row.idle_days)} dias` : `conta há ${count(row.signup_days)} dias, sem usar`}</small></span></button>`).join("")}</div>`
       : `<p class="wb-sub">Ninguém na fila agora.</p>`;
     const list = talks.length ? `<p class="wb-sub">Conversas</p>${talks.map(renderTalk).join("")}` : "";
-    const templates = `<details class="wb-details"><summary>Ver a mensagem que abre a conversa</summary>${WINBACK_TEMPLATES.map(([name, text, buttons]) => `<div class="wb-template"><span>${esc(name)}</span><p>${esc(text)}</p><div class="wb-buttons">${buttons.map((label) => `<i>${esc(label)}</i>`).join("")}</div></div>`).join("")}<p class="chart-caption">Só para telefone verificado, uma abordagem por pessoa. Depois da resposta a Gain IA faz no máximo três mensagens curtas, encerra e grava o resumo nas observações da conta. Quem responde SAIR não recebe mais.</p></details>`;
+    const templates = `<details class="wb-details"><summary>Ver a mensagem que abre a conversa</summary>${WINBACK_TEMPLATES.map(([name, text, buttons]) => `<div class="wb-template"><span>${esc(name)}</span><p>${esc(text)}</p><div class="wb-buttons">${buttons.map((label) => `<i>${esc(label)}</i>`).join("")}</div></div>`).join("")}<p class="chart-caption">Só para telefone verificado, uma abordagem por pessoa. Depois da resposta a Gain IA faz no máximo três mensagens curtas, encerra e grava o resumo nas observações da conta. Quem responde SAIR não recebe mais. Cada modelo só sai depois de aprovado pela Meta: a situação aparece na página WhatsApp.</p></details>`;
     return panel(title, copy, status + facts + queue + list + templates, toggle, "wb-panel");
   }
 
@@ -2941,7 +2941,9 @@
     const numberPanel = panel(title, "Registrado na API oficial da Meta",`<div class="info-list">${row("Número", cloud.display_phone_number || "—")}${row("Nome exibido", cloud.verified_name || "—")}${row("Envio", cloudSendLabel(send))}${row("Qualidade", cloudQualityLabel(cloud.quality_rating))}${row("Limite", cloudLimitLabel(cloud.messaging_limit_tier))}${row("Resposta da Meta", cloud.latency_ms != null ? `${count(cloud.latency_ms)} ms` : "—")}</div>${issueBlock}`, pill(cloudSendLabel(send), send === "AVAILABLE" ? "green" : send === "LIMITED" ? "yellow" : "red"));
     const templates = [
       ["codigo_de_verificacao", "Código de verificação", "autenticação"],
-      ["aviso_android_vitals", "Aviso de Android vitals", "utilidade"]
+      ["aviso_android_vitals", "Aviso de Android vitals", "utilidade"],
+      ["retorno_parou_de_usar", "Conversa de retorno · parou de usar", "marketing"],
+      ["retorno_configuracao", "Conversa de retorno · não começou", "marketing"]
     ];
     const templateRows = cloud.templates
       ? `<div class="activity-list">${templates.map(([key, label, use]) => { const status = templateState(cloud.templates[key]); return `<div class="activity-item"><span class="activity-icon">${icon("message")}</span><span class="activity-copy"><strong>${esc(label)}</strong><small>${esc(key)} · ${esc(use)}</small></span>${pill(status.label, status.tone)}</div>`; }).join("")}</div>`
