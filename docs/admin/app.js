@@ -9,9 +9,9 @@
 
   const PAGES = {
     overview: { eyebrow: "Painel", title: "Visão geral", description: "Quem chegou, quem usa, quem paga e o que precisa de atenção." },
-    growth: { eyebrow: "Negócio", title: "Novos usuários", description: "Funil do cadastro à assinatura e onde as pessoas param." },
+    growth: { eyebrow: "Negócio", title: "Novos usuários", description: "Trilha do cadastro à assinatura: quem chegou, onde parou e por quê." },
     sales: { eyebrow: "Negócio", title: "Vendas", description: "Receita, assinantes, testes acabando e quem foi embora." },
-    adoption: { eyebrow: "Negócio", title: "Uso e adoção", description: "Quantos usam, quanto, de qual plataforma e quem parou." },
+    adoption: { eyebrow: "Negócio", title: "Uso e adoção", description: "Quem usa, quem esfriou, por que pararam e o que cada um usa." },
     users: { eyebrow: "Clientes", title: "Usuários", description: "Contas, licenças, dispositivos e uso do monitoramento." },
     referrals: { eyebrow: "Clientes", title: "Indicações", description: "Indique e ganhe: quem indicou, quantos entraram e o que cada lado ganhou." },
     broadcast: { eyebrow: "Clientes", title: "Comunicados", description: "Envio controlado de mensagens para números verificados ou uma lista manual." },
@@ -42,7 +42,6 @@
     page: "overview",
     devices: null,
     accounts: [],
-    statistics: null,
     diagnostics: null,
     health: null,
     whatsapp: null,
@@ -60,6 +59,11 @@
     sales: null,
     adoption: null,
     growthStage: "all",
+    map: null,
+    winback: null,
+    useState: "all",
+    featureMode: "ever",
+    talkOpen: new Set(),
     ai: { config: null, draft: null, dirty: false, saving: false, tab: "overview", days: 30, chart: "cost", eventFilter: "all", metrics: null, events: null, models: null, available: null, probes: {}, fx: null, fxLoading: false, health: null, provider: null, providerSaving: false, providerError: "", saveError: "", savedAt: null, plans: null, granting: false },
     now: Date.now(),
     serverNow: null,
@@ -589,13 +593,6 @@
     }, options);
   }
 
-  function loadStatistics(options = {}) {
-    return loadResource("statistics", () => rpc("admin_usage_statistics", {}), (result) => {
-      if (result.status && result.status !== "ok") throw new Error("Sem permissão para consultar as estatísticas.");
-      state.statistics = result;
-    }, options);
-  }
-
   function loadDiagnostics(options = {}) {
     return loadResource("diagnostics", () => rpc("admin_list_diagnostic_reports", { p_status: null, p_limit: 500 }), (result) => {
       if (result.status !== "ok") throw new Error("Sem permissão para consultar os diagnósticos.");
@@ -669,9 +666,9 @@
       }
       const loaders = {
         overview: () => Promise.allSettled([loadDevices({ quiet: true }), loadDiagnostics({ quiet: true }), loadHealth({ quiet: true }), loadGrowth({ quiet: true }), loadSales({ quiet: true }), loadAdoption({ quiet: true }), loadVitals({ quiet: true })]),
-        growth: () => Promise.allSettled([loadGrowth({ quiet: true }), loadDevices({ quiet: true })]),
+        growth: () => Promise.allSettled([loadGrowth({ quiet: true }), loadMap({ quiet: true }), loadDevices({ quiet: true })]),
         sales: () => Promise.allSettled([loadSales({ quiet: true }), loadDevices({ quiet: true })]),
-        adoption: () => Promise.allSettled([loadAdoption({ quiet: true }), loadStatistics({ quiet: true })]),
+        adoption: () => Promise.allSettled([loadAdoption({ quiet: true }), loadMap({ quiet: true }), loadWinback({ quiet: true })]),
         users: () => Promise.allSettled([loadDevices({ quiet: true }), loadVersions({ quiet: true })]),
         referrals: () => loadReferrals({ quiet: true }),
         diagnostics: () => loadDiagnostics({ quiet: true }),
@@ -728,12 +725,9 @@
 
   function activatePageData(page) {
     if (page === "overview") ensureMetrics(["growth", "sales", "adoption"]);
-    if (page === "growth") ensureMetrics(["growth"]);
+    if (page === "growth") { ensureMetrics(["growth"]); ensureMap(); }
     if (page === "sales") ensureMetrics(["sales"]);
-    if (page === "adoption") {
-      ensureMetrics(["adoption"]);
-      if (!state.statistics && !state.loading.statistics) loadStatistics({ quiet: true });
-    }
+    if (page === "adoption") { ensureMetrics(["adoption"]); ensureMap(); ensureWinback(); }
     if (page === "users" && !state.versions && !state.loading.versions) loadVersions();
     if (page === "traces" && !state.traces && !state.loading.traces) loadTraces();
     if (page === "vitals" && !state.vitals && !state.loading.vitals) loadVitals();
@@ -815,7 +809,6 @@
     "Usaram um dia só e não voltaram.",
     "Usam o app, mas ainda não pagaram (muitos ainda estão no teste de 30 dias)."
   ];
-  const STAGE_FILTERS = [["all", "Todas"], ["0-1", "Antes do telefone"], ["2", "Sem leitura"], ["3", "Nada lido"], ["4", "Usou 1 dia"], ["5", "Usando"], ["6", "Pagantes"]];
   const TIER_LABELS = { essential: "Essencial", pro: "Pro", ultra: "Ultra", pack: "Recarga" };
   const SOURCE_LABELS = { play: "Google Play", pix: "Pix" };
   /* Par categórico validado (CVD e visão normal) contra a superfície escura. */
@@ -1166,66 +1159,243 @@
       <section class="content-grid content-grid--wide-left">${recent}${renderServiceSummary()}</section></div>`;
   }
 
-  /* Novos usuários ------------------------------------------------------- */
-  function renderRetention(rows) {
-    const visible = (rows || []).filter((row) => asNumber(row.size) > 0);
-    if (!visible.length) return plainNotice("Ainda não há semanas com cadastros reais desde 01/09/2026.", "info");
-    const weeks = Math.max(...visible.map((row) => (row.active || []).length));
-    const head = `<tr><th>Semana do cadastro</th><th>Contas</th>${Array.from({ length: weeks }, (_, k) => `<th>${k === 0 ? "1ª sem." : `+${k}`}</th>`).join("")}</tr>`;
-    const body = visible.map((row) => `<tr><th scope="row">${esc(dayShort(row.week))}</th><td class="cohort-size">${count(row.size)}</td>${Array.from({ length: weeks }, (_, k) => {
-      const value = row.active?.[k];
-      if (value == null) return `<td class="cohort-cell is-future"></td>`;
-      const share = pct(value, row.size);
-      return `<td class="cohort-cell${share >= 70 ? " is-strong" : ""}" style="--share:${share}" title="${count(value)} de ${count(row.size)} usaram a leitura nesta semana">${share}%</td>`;
-    }).join("")}</tr>`).join("");
-    return `<div class="cohort-wrap"><table class="cohort-table"><thead>${head}</thead><tbody>${body}</tbody></table></div><p class="chart-caption">Cada linha é a turma que se cadastrou naquela semana; cada coluna, a fatia que usou a leitura na semana seguinte. Cor mais forte, mais gente usando.</p>`;
+  /* Mapa de uso ----------------------------------------------------------
+     Uma linha por pessoa (admin_usage_map): etapa, estado de uso, 28 dias de
+     leitura, causa provável de quem parou, passos da 1ª vez, observação e
+     conversa de retorno. Sustenta "Novos usuários" e "Uso e adoção". */
+  function loadMap(options = {}) {
+    return loadResource("map", () => rpc("admin_usage_map", {}), (result) => {
+      if (result.status !== "ok") throw new Error("Sem permissão para consultar o mapa de uso.");
+      state.map = result;
+    }, options);
   }
 
-  function renderGrowthAccounts(g) {
-    const rows = (g.accounts || []).filter((row) => matchesStage(row, state.growthStage));
-    const chips = STAGE_FILTERS.map(([value, label]) => {
-      const total = (g.accounts || []).filter((row) => matchesStage(row, value)).length;
+  function loadWinback(options = {}) {
+    return loadResource("winback", () => rpc("admin_winback_overview", {}), (result) => {
+      if (result.status !== "ok") throw new Error("Sem permissão para consultar as conversas de retorno.");
+      state.winback = result;
+    }, options);
+  }
+
+  function ensureMap() { if (!state.map && !state.loading.map) loadMap({ quiet: true }); }
+  function ensureWinback() { if (!state.winback && !state.loading.winback) loadWinback({ quiet: true }); }
+
+  /* Estações da trilha: cada conta fica na mais avançada que alcançou. As
+     quatro primeiras são perdas; as duas últimas, quem ficou. */
+  const TRAIL = [
+    { id: "0-1", min: 0, tone: "plain", label: "Criou a conta", chip: "Sem telefone", stop: "não confirmaram o telefone", why: "Criaram a conta e pararam na tela do telefone. Veja as falhas de envio do código em WhatsApp." },
+    { id: "2", min: 2, tone: "plain", label: "Confirmou o telefone", chip: "Sem leitura", stop: "não ligaram a leitura", why: "É o passo da permissão de acessibilidade: a pessoa vê o aviso do Android e desiste, ou deixa para depois e esquece." },
+    { id: "3", min: 3, tone: "plain", label: "Ligou a leitura", chip: "Nada lido", stop: "ligaram e nada foi lido", why: "Ou não rodaram com o app ligado, ou a leitura falhou no aparelho. Vale abrir a conta e conferir a versão." },
+    { id: "4", min: 4, tone: "plain", label: "Leu corridas", chip: "Usou 1 dia", stop: "usaram um dia só", why: "Viram funcionar e não voltaram: a primeira impressão não convenceu." },
+    { id: "5", min: 5, tone: "green", label: "Voltou outro dia", chip: "Usando", stop: "usam e ainda não assinam", why: "" },
+    { id: "6", min: 6, tone: "gold", label: "Assinou", chip: "Assinantes", stop: "assinaram", why: "" }
+  ];
+
+  /* Passos da 1ª vez, na ordem em que o app os apresenta. As chaves são as
+     que o app envia em report_usage_diary (usage_milestones). */
+  const ONBOARDING_STEPS = [
+    ["app_opened", "Abriu o app"],
+    ["signed_in", "Entrou com a conta"],
+    ["terms_accepted", "Aceitou os termos"],
+    ["phone_verified", "Confirmou o telefone"],
+    ["intro_done", "Passou pela apresentação"],
+    ["home_seen", "Chegou à tela inicial"],
+    ["disclosure_seen", "Viu o aviso da acessibilidade"],
+    ["disclosure_accepted", "Aceitou o aviso"],
+    ["accessibility_granted", "Ligou a acessibilidade"],
+    ["overlay_granted", "Permitiu a sobreposição"],
+    ["reading_started", "Abriu o ícone flutuante"],
+    ["first_request_read", "Leu a 1ª solicitação"],
+    ["first_ride_finished", "Acompanhou a 1ª corrida até o fim"],
+    ["plans_seen", "Viu os planos"],
+    ["purchase_started", "Começou uma compra"],
+    ["purchased", "Assinou"]
+  ];
+
+  const STOP_CAUSES = {
+    acesso_venceu: ["O acesso venceu", "Parou junto com o fim do teste ou da assinatura: não viu valor a ponto de pagar, ou achou caro."],
+    nada_lido: ["Nunca leu nada", "Ligou a leitura e nenhuma solicitação foi lida: provável falha no aparelho, ou não rodou."],
+    um_dia: ["Usou um dia só", "Testou e não voltou: a primeira impressão não convenceu."],
+    sem_corrida: ["Nenhuma corrida até o fim", "Leu solicitações, mas nenhuma corrida foi acompanhada até o fim."],
+    sem_pista: ["Usou e sumiu", "Leu e acompanhou corridas em mais de um dia, e parou sem sinal nos dados. Só perguntando."]
+  };
+  const TALK_REASONS = { tecnico: "Não funcionou bem", nao_viu_valor: "Não viu vantagem", preco: "Achou caro", parou_de_rodar: "Parou de rodar", dificuldade_configurar: "Não conseguiu configurar", receio_privacidade: "Receio das permissões", falta_de_tempo: "Ainda não testou", concorrente: "Usa outro app", outro: "Outro motivo", sem_resposta_clara: "Não deixou claro" };
+  const TALK_STATUS = { queued: ["na fila", "neutral"], sent: ["enviada", "blue"], delivered: ["entregue", "blue"], read: ["lida, sem resposta", "purple"], replied: ["em conversa", "yellow"], closed: ["concluída", "green"], expired: ["sem resposta", "neutral"], failed: ["não entregue", "red"], opted_out: ["pediu para sair", "red"] };
+
+  function mapNow() { return asNumber(state.map?.generated_at_ms) || state.serverNow || Date.now(); }
+  function agoDays(ms) { return Math.max(0, Math.floor((mapNow() - asNumber(ms)) / DAY_MS)); }
+  function agoCopy(ms) {
+    if (!asNumber(ms)) return "nunca";
+    const days = agoDays(ms);
+    return days === 0 ? "hoje" : days === 1 ? "ontem" : `há ${count(days)} dias`;
+  }
+  function plural(value, one, many) { return `${count(value)} ${asNumber(value) === 1 ? one : many}`; }
+  function shortName(row) {
+    const source = String(row.name || row.email || "Conta").trim();
+    return (row.name ? source.split(/\s+/)[0] : source.split("@")[0]) || "Conta";
+  }
+  function nameList(rows, limit = 3) {
+    const names = rows.slice(0, limit).map(shortName);
+    const rest = rows.length - names.length;
+    return esc(names.join(", ") + (rest > 0 ? ` e mais ${rest}` : ""));
+  }
+
+  /* Dois quadros no topo das duas telas: o que os números dizem em frases.
+     Cada item já vem com o HTML escapado por quem o monta. */
+  function insightBoard(good, bad, emptyGood, emptyBad) {
+    const column = (title, tone, iconName, items, empty) => `<article class="panel ins-col ins-col--${tone}"><header class="ins-head"><span class="ins-icon">${icon(iconName)}</span><h3 class="section-title">${esc(title)}</h3></header>${items.length ? `<ul class="ins-list">${items.map((item) => `<li><strong>${item.title}</strong><span>${item.copy}</span>${item.action || ""}</li>`).join("")}</ul>` : `<p class="ins-empty">${esc(empty)}</p>`}</article>`;
+    return `<section class="ins-board">${column("Indo bem", "good", "check-circle", good, emptyGood)}${column("Onde está perdendo", "bad", "alert", bad, emptyBad)}</section>`;
+  }
+
+  function personBubble(row, tone = "") {
+    const mark = row.note || row.talk ? '<i class="bubble-mark" aria-hidden="true"></i>' : "";
+    const label = `${row.name || row.email || "Conta"} · chegou ${agoCopy(row.created_ms)}`;
+    return `<button class="bubble${tone ? ` bubble--${tone}` : ""}" type="button" data-open-user-id="${esc(row.user_id)}" title="${esc(label)}" aria-label="Abrir a conta de ${esc(row.name || row.email || "usuário")}">${esc(initials(row.name, row.email))}${mark}</button>`;
+  }
+
+  /* Plano, conversa de retorno e observação: o que já se sabe da pessoa. */
+  function personBadges(row) {
+    const parts = [];
+    if (row.paying_tier) parts.push(pill(TIER_LABELS[row.paying_tier] || "assinante", "green"));
+    if (row.talk) {
+      const [label, tone] = TALK_STATUS[row.talk.status] || [row.talk.status, "neutral"];
+      parts.push(`<span class="status-pill pill-${tone} talk-pill" title="Conversa de retorno pelo WhatsApp">${icon("message")}${esc(row.talk.reason ? TALK_REASONS[row.talk.reason] || label : `conversa ${label}`)}</span>`);
+    }
+    if (row.note && !(row.note.source === "winback" && row.talk)) {
+      const first = String(row.note.body || "").split("\n")[0];
+      parts.push(`<span class="note-chip" title="${esc(row.note.body)}">${icon("bookmark")}<span>${esc(first)}</span></span>`);
+    }
+    return parts.join("");
+  }
+
+  function lastStep(row) {
+    if (!row.steps) return null;
+    let best = null;
+    ONBOARDING_STEPS.forEach(([key, label]) => { if (row.steps[key] != null) best = { key, label, ms: asNumber(row.steps[key]) }; });
+    return best;
+  }
+
+  /* Novos usuários ------------------------------------------------------- */
+  function renderTrail(stations, total, worst) {
+    const stops = stations.map((station, index) => {
+      const here = station.here;
+      const selected = state.growthStage === station.id;
+      const share = total ? Math.round(station.reached * 100 / total) : 0;
+      const crowd = here.slice(0, 12).map((row) => personBubble(row, station.tone === "plain" ? "" : station.tone)).join("") + (here.length > 12 ? `<span class="bubble bubble--more">+${count(here.length - 12)}</span>` : "");
+      const loss = index < 4;
+      const stopCopy = here.length
+        ? `<strong>${loss ? plural(here.length, "parou aqui", "pararam aqui") : plural(here.length, "pessoa", "pessoas")}</strong>${esc(station.stop)}`
+        : `<span class="trail-none">${loss ? "ninguém parou aqui" : "ninguém ainda"}</span>`;
+      return `<li class="trail-stop trail-stop--${station.tone}${station === worst ? " is-worst" : ""}${selected ? " is-selected" : ""}${station.reached ? " is-reached" : ""}">
+        <button class="trail-node" type="button" data-growth-stage="${station.id}" aria-pressed="${selected}" title="Ver quem está nesta estação">
+          <span class="trail-dot">${count(station.reached)}</span>
+          <span class="trail-label">${esc(station.label)}</span>
+          <span class="trail-share">${total && index ? `${share}% dos que chegaram` : total ? "ponto de partida" : "—"}</span>
+        </button>
+        <div class="trail-crowd">${crowd}</div>
+        <p class="trail-stopcopy">${stopCopy}</p>
+      </li>`;
+    }).join("");
+    return `<ol class="trail">${stops}</ol>`;
+  }
+
+  function renderTrailPeople(people) {
+    const rows = people.filter((row) => matchesStage(row, state.growthStage));
+    const chips = [["all", "Todas"], ...TRAIL.map((station) => [station.id, station.chip])].map(([value, label]) => {
+      const total = people.filter((row) => matchesStage(row, value)).length;
       return `<button class="filter-chip" type="button" data-growth-stage="${value}" aria-pressed="${state.growthStage === value}">${esc(label)} <span class="chip-count">${count(total)}</span></button>`;
     }).join("");
-    const list = rows.length ? `<div class="biz-table">${rows.map((row) => `<div class="biz-row">
-        <span class="biz-cell biz-cell--person">${personCell(row)}</span>
-        <span class="biz-cell"><span class="biz-label">Cadastro</span><span class="cell-primary">${esc(relative(row.created_ms))}</span><span class="cell-secondary">${esc(dateTime(row.created_ms))} · ${esc(row.provider === "google" ? "Google" : "E-mail")}</span></span>
-        <span class="biz-cell biz-cell--stage"><span class="biz-label">Etapa</span>${stageProgress(row.stage)}</span>
-        <span class="biz-cell"><span class="biz-label">Uso da leitura</span><span class="cell-primary">${asNumber(row.mon_days) ? `${count(row.mon_days)} ${asNumber(row.mon_days) === 1 ? "dia" : "dias"} · ${esc(hours(row.mon_ms))}` : "Nunca ligou"}</span><span class="cell-secondary">${asNumber(row.rides) ? `${count(row.rides)} lidas · ${count(row.finished)} finalizadas` : "Nada lido"}</span></span>
-        <span class="biz-cell"><span class="biz-label">Último sinal</span><span class="cell-primary">${esc(relative(Math.max(asNumber(row.last_seen_ms), asNumber(row.mon_last_ms))))}</span><span class="cell-secondary">${row.app_name ? `app ${esc(row.app_name)}` : "versão não informada"}</span></span>
-        <span class="biz-cell biz-cell--actions">${contactActions(row)}</span>
-      </div>`).join("")}</div>` : plainNotice("Nenhuma conta nesta etapa.", "info");
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Contas novas ${esc(cohortCopy(g))}</h3><p class="section-copy">Filtre pela etapa em que pararam para saber com quem falar</p></div></div><div class="filter-row">${chips}</div>${list}</article>`;
+    const list = rows.length ? `<div class="who-list">${rows.map((row) => {
+      const station = TRAIL.find((item) => matchesStage(row, item.id));
+      const step = lastStep(row);
+      const signal = Math.max(asNumber(row.last_seen_ms), asNumber(row.mon_last_ms));
+      const usage = asNumber(row.mon_days) ? `${plural(row.mon_days, "dia", "dias")} de uso · ${esc(hours(row.mon_ms))}` : row.app_name ? `app ${esc(row.app_name)}` : "sem uso";
+      return `<div class="who-row">
+        <span class="who-cell who-cell--person">${personCell(row)}</span>
+        <span class="who-cell"><span class="who-label">Chegou</span><span class="cell-primary">${esc(agoCopy(row.created_ms))}</span><span class="cell-secondary">${esc(shortDate(row.created_ms))}</span></span>
+        <span class="who-cell"><span class="who-label">Estação</span><span class="cell-primary">${esc(station?.label || "—")}</span><span class="cell-secondary">${step ? `último passo: ${esc(step.label)}` : esc(station?.stop || "")}</span></span>
+        <span class="who-cell"><span class="who-label">Último sinal</span><span class="cell-primary">${esc(signal ? agoCopy(signal) : "nunca abriu")}</span><span class="cell-secondary">${usage}</span></span>
+        <span class="who-cell who-cell--badges">${personBadges(row)}</span>
+        ${contactActions(row)}
+      </div>`;
+    }).join("")}</div>` : plainNotice("Ninguém nesta estação.", "info");
+    return panel("Quem são", "Toque numa estação da trilha para filtrar. O telefone abre a conversa no WhatsApp; a seta abre a conta", `<div class="filter-row">${chips}</div>${list}`);
+  }
+
+  function renderOnboarding(map) {
+    const title = "Passo a passo da primeira vez";
+    const info = map?.onboarding || {};
+    const base = asNumber(info.accounts);
+    if (!base) {
+      return panel(title, "Em qual tela da configuração cada conta nova para", `<div class="soon">${icon("clock")}<div><strong>Começa a aparecer com a próxima versão do app.</strong><span>A partir dela, cada conta nova marca o dia em que passou por cada passo. Aqui vai dar para ver o ponto exato em que a pessoa desistiu, em vez de só “não ligou a leitura”.</span></div></div><ol class="steps-preview">${ONBOARDING_STEPS.slice(0, 13).map(([, label]) => `<li>${esc(label)}</li>`).join("")}</ol>`);
+    }
+    const counts = new Map((info.steps || []).map((item) => [item.step, asNumber(item.count)]));
+    const rows = ONBOARDING_STEPS.map(([key, label]) => ({ key, label, n: counts.get(key) || 0 }));
+    let worst = null;
+    rows.forEach((row, index) => {
+      if (!index || index > 12) return;
+      const drop = rows[index - 1].n - row.n;
+      if (drop > 0 && (!worst || drop > worst.drop)) worst = { index, drop };
+    });
+    const bars = rows.map((row, index) => `<div class="${worst?.index === index ? "step-row is-worst" : "step-row"}">${bar(row.label, row.n, base, worst?.index === index ? "var(--red)" : "var(--blue)", `${pct(row.n, base)}%`)}</div>`).join("");
+    const callout = worst ? `<p class="chart-caption"><strong>${plural(worst.drop, "conta parou", "contas pararam")}</strong> entre “${esc(rows[worst.index - 1].label)}” e “${esc(rows[worst.index].label)}”.</p>` : "";
+    return panel(title, `${plural(base, "conta", "contas")} com os passos registrados (app novo)`, `<div class="bar-list">${bars}</div>${callout}`);
   }
 
   function renderGrowth() {
-    const header = pageHeading("Novos usuários", "Quem chegou e até onde foi, do cadastro à assinatura. Robôs de revisão da Google ficam fora da conta.", periodControl());
-    const gate = metricGate("growth", "Montando o funil…");
+    const header = pageHeading("Novos usuários", "Quem chegou, até onde foi e onde a trilha perde gente. Robôs de revisão da Google ficam fora da conta.", periodControl());
+    const gate = metricGate("growth", "Montando a trilha…");
     if (gate) return header + gate;
-    const g = state.growth;
-    const funnel = g.funnel || [];
-    const daily = daysSinceUsage(g, g.daily || []);
+    const g = state.growth, map = state.map;
+    const extra = new Map((map?.people || []).map((row) => [row.user_id, row]));
+    const people = (g.accounts || []).map((row) => ({ ...row, ...(extra.get(row.user_id) || {}) }));
+    const total = people.length;
     const comparable = growthComparable(g);
-    const at = (index, field = "count") => asNumber(funnel[index]?.[field]);
-    const signups = at(0);
+    const previous = asNumber(g.funnel?.[0]?.prev);
+    const since = cohortCopy(g);
+    const stations = TRAIL.map((station) => ({ ...station, here: people.filter((row) => matchesStage(row, station.id)), reached: people.filter((row) => asNumber(row.stage) >= station.min).length }));
+    const worst = stations.slice(0, 4).reduce((best, station) => (station.here.length > (best?.here.length || 0) ? station : best), null);
+    const reached = (index) => stations[index].reached;
+    const seeButton = (stage, label = "Ver quem são") => `<button class="text-button" type="button" data-growth-stage="${stage}">${esc(label)} ${icon("arrow-right")}</button>`;
+
+    const good = [], bad = [];
+    if (total && comparable && total > previous) good.push({ title: `Chegou mais gente: ${plural(total, "conta nova", "contas novas")}`, copy: `Eram ${count(previous)} no período anterior.` });
+    if (total >= 2 && reached(1) / total >= 0.7) good.push({ title: `${count(reached(1))} de ${count(total)} confirmaram o telefone`, copy: "Criar a conta e confirmar o número não é onde a trilha trava." });
+    if (reached(2) && reached(3) / reached(2) >= 0.7) good.push({ title: `Quem liga a leitura vê funcionar`, copy: `${count(reached(3))} de ${count(reached(2))} tiveram solicitações lidas.` });
+    if (reached(3) && reached(4) / reached(3) >= 0.6) good.push({ title: `Quem lê a primeira corrida volta`, copy: `${count(reached(4))} de ${count(reached(3))} usaram a leitura em outro dia: ${nameList(stations[4].here.concat(stations[5].here))}.` });
+    if (reached(5)) good.push({ title: `${plural(reached(5), "assinatura", "assinaturas")} entre as contas novas`, copy: `${nameList(stations[5].here)}.` });
+
+    if (!total) bad.push({ title: "Ninguém chegou no período", copy: "Nenhuma conta real foi criada. O problema está antes do app: divulgação e página da loja." });
+    else if (total < 5) bad.push({ title: `Pouca gente chegando: ${plural(total, "conta", "contas")} ${esc(since)}`, copy: "Com esse volume, cada pessoa pesa mais que qualquer percentual. O gargalo está na divulgação." });
+    if (total && comparable && total < previous) bad.push({ title: `Chegou menos gente que antes`, copy: `${plural(total, "conta nova", "contas novas")}, contra ${count(previous)} no período anterior.` });
+    if (worst && worst.here.length) bad.push({ title: `${count(worst.here.length)} de ${count(total)} ${esc(worst.stop)}`, copy: esc(worst.why), action: seeButton(worst.id) });
+    const trying = people.filter((row) => asNumber(row.stage) <= 2 && asNumber(row.last_seen_ms) && agoDays(row.last_seen_ms) <= 3);
+    if (trying.length) bad.push({ title: `${plural(trying.length, "pessoa abriu", "pessoas abriram")} o app nos últimos dias e ainda não ${trying.length === 1 ? "ligou" : "ligaram"} a leitura`, copy: `É a hora de falar com ${trying.length === 1 ? "ela" : "elas"}, enquanto ainda ${trying.length === 1 ? "está" : "estão"} tentando: ${nameList(trying)}.`, action: seeButton("2", "Ver quem não ligou a leitura") });
+    if (reached(4) && !reached(5)) bad.push({ title: `${plural(reached(4), "pessoa usa", "pessoas usam")} e ninguém assinou ainda`, copy: "Veja em Vendas quando o teste de cada uma acaba.", action: `<button class="text-button" type="button" data-nav="sales">Vendas ${icon("arrow-right")}</button>` });
+
+    const heroCopy = total
+      ? `${reached(4) ? `<strong>${plural(reached(4), "passou", "passaram")} a usar de verdade</strong> (leitura ligada em mais de um dia)` : "<strong>Ninguém passou a usar de verdade ainda</strong> (leitura ligada em mais de um dia)"}${reached(5) ? ` e <strong>${plural(reached(5), "assinou", "assinaram")}</strong>` : ""}.${worst && worst.here.length ? ` A maior perda: ${plural(worst.here.length, "pessoa", "pessoas")} que ${esc(worst.stop)}.` : ""}`
+      : "Nenhuma conta real foi criada no período.";
+    const hero = `<section class="hero-line"><div class="hero-figure"><strong>${count(total)}</strong><span>${total === 1 ? "pessoa chegou" : "pessoas chegaram"} ${esc(since)}</span></div><p class="hero-copy">${heroCopy}</p></section>`;
+
+    const facts = `<div class="trail-facts"><span>Até confirmar o telefone <strong>${esc(humanHours(g.timing?.phone_hours))}</strong></span><span>Até ligar a leitura <strong>${esc(humanHours(g.timing?.activation_hours))}</strong></span><span>Base inteira <strong>${count(g.totals?.accounts)} contas reais</strong>, ${count(g.totals?.activated)} já ligaram a leitura</span></div>`;
+    const trail = panel("A trilha do motorista novo", `Contas criadas ${since}. Cada bolinha é uma pessoa, parada na estação mais avançada que alcançou; o número é quantas chegaram até ali`, total ? renderTrail(stations, total, worst) + facts : plainNotice("Nenhuma conta real criada no período.", "info"), "", "trail-panel");
+
+    const daily = daysSinceUsage(g, g.daily || []);
+    const chart = panel("Chegadas por dia", "Passe o mouse para ver quantos confirmaram o telefone e ligaram a leitura no dia", timeChart("growth-signups", { days: daily.map((day) => day.d), series: [{ name: "cadastros", color: "var(--blue)", values: daily.map((day) => day.signups) }], kind: "columns", extra: [{ name: "confirmaram o telefone", values: daily.map((day) => day.phone) }, { name: "ligaram a leitura", values: daily.map((day) => day.activated) }], label: "Cadastros por dia" }));
     const robots = asNumber(g.robots?.period);
-    const cutNotice = g.period?.cohort_start && g.period.cohort_start !== g.period.start ? `<div class="notice">${icon("clock")}<span>O funil começa em <strong>${esc(dayShort(g.period.cohort_start))}</strong>: o uso de antes de 01/09/2026 não foi guardado, e uma conta mais antiga pareceria “não ligou a leitura” sem ter sido isso.</span></div>` : "";
-    const robotNotice = robots ? `<div class="notice notice--info">${icon("info")}<span><strong>${count(robots)} ${robots === 1 ? "conta de robô" : "contas de robôs"} de revisão da Google ${robots === 1 ? "ficou" : "ficaram"} fora destes números.</strong> A Google cria uma a cada versão enviada à Play (e-mail “nome.12345@gmail.com”, sempre num OnePlus8Pro) e elas nunca confirmam o telefone.</span></div>` : "";
-    const tiles = `<section class="metric-grid kpi-grid kpi-grid--four">
-      ${kpiTile({ label: "Cadastros", value: count(signups), delta: deltaChip(signups, at(0, "prev"), { comparable }), foot: `${count(g.totals?.accounts)} contas reais no total`, spark: daily.map((day) => day.signups), tone: "blue", iconName: "users" })}
-      ${kpiTile({ label: "Confirmaram o telefone", value: count(at(2)), delta: deltaChip(at(2), at(2, "prev"), { comparable }), foot: `<strong>${pct(at(2), signups)}%</strong> dos cadastros · ganham 30 dias`, tone: "purple", iconName: "phone" })}
-      ${kpiTile({ label: "Ligaram a leitura", value: count(at(3)), delta: deltaChip(at(3), at(3, "prev"), { comparable }), foot: `<strong>${pct(at(3), signups)}%</strong> dos cadastros · mediana ${esc(humanHours(g.timing?.activation_hours))}`, tone: "green", iconName: "shield" })}
-      ${kpiTile({ label: "Assinaram", value: count(at(6)), delta: deltaChip(at(6), at(6, "prev"), { comparable }), foot: `<strong>${pct(at(6), signups)}%</strong> dos cadastros do período`, tone: "yellow", iconName: "wallet" })}
-    </section>`;
-    const providers = (g.providers || []);
-    const side = panel("Como chegam", "Entrada e tempo até cada passo", `<div class="bar-list">${providers.length ? providers.map((item) => bar(item.provider === "google" ? "Conta Google" : item.provider === "email" ? "E-mail e senha" : item.provider, item.count, signups, "var(--blue)", `${pct(item.count, signups)}%`)).join("") : plainNotice("Sem cadastros no período.", "info")}</div>
-      <div class="info-list" style="margin-top:1rem"><div class="info-row"><span>Até confirmar o telefone</span><span>${esc(humanHours(g.timing?.phone_hours))}</span></div><div class="info-row"><span>Até ligar a leitura</span><span>${esc(humanHours(g.timing?.activation_hours))}</span></div><div class="info-row"><span>Base real com telefone</span><span>${count(g.totals?.phone_ok)} de ${count(g.totals?.accounts)}</span></div><div class="info-row"><span>Base real que já ligou a leitura</span><span>${count(g.totals?.activated)}</span></div></div>
-      <p class="chart-caption">Tempos são a mediana das contas criadas no período.</p>`);
-    const chart = panel("Cadastros por dia", "Passe o mouse para ver quantos confirmaram e ligaram a leitura no dia", timeChart("growth-signups", { days: daily.map((day) => day.d), series: [{ name: "cadastros", color: "var(--blue)", values: daily.map((day) => day.signups) }], kind: "columns", extra: [{ name: "confirmaram o telefone", values: daily.map((day) => day.phone) }, { name: "ligaram a leitura", values: daily.map((day) => day.activated) }], label: "Cadastros por dia" }));
-    return header + `<div class="biz-page${refreshingClass("growth")}">${cutNotice}${robotNotice}${tiles}
-      <section class="content-grid content-grid--wide-left">${panel("Do cadastro à assinatura", `Contas criadas ${cohortCopy(g)} e a etapa mais avançada de cada uma`, signups ? funnelView(funnel, { showPrev: comparable }) : plainNotice("Nenhuma conta real criada no período.", "info"))}${side}</section>
-      <section class="content-grid">${chart}${panel("Retenção por semana de cadastro", "De quem chegou em cada semana, quantos seguiram usando", renderRetention(g.retention))}</section>
-      ${renderGrowthAccounts(g)}</div>`;
+    const notes = [
+      g.period?.cohort_start && g.period.cohort_start !== g.period.start ? `A trilha começa em ${dayShort(g.period.cohort_start)}: o uso de antes de 01/09/2026 não foi guardado, e uma conta mais antiga pareceria “não ligou a leitura” sem ter sido isso.` : "",
+      robots ? `${plural(robots, "conta de robô", "contas de robôs")} de revisão da Google ${robots === 1 ? "ficou" : "ficaram"} fora (a Google cria uma a cada versão enviada à Play).` : ""
+    ].filter(Boolean);
+    const footnote = notes.length ? `<p class="page-footnote">${icon("info")}<span>${esc(notes.join(" "))}</span></p>` : "";
+
+    return header + `<div class="biz-page${refreshingClass("growth", "map")}">${hero}
+      ${insightBoard(good, bad, "Ainda sem um ponto forte claro neste período.", "Nenhuma perda relevante neste período.")}
+      ${trail}
+      ${total ? renderTrailPeople(people) : ""}
+      <section class="content-grid">${chart}${renderOnboarding(map)}</section>
+      ${footnote}</div>`;
   }
 
   /* Vendas --------------------------------------------------------------- */
@@ -1297,51 +1467,332 @@
     ["missed", "Não aceitas", "Lidas e deixadas passar (é o normal da maioria)"]
   ];
 
-  function renderAdoption() {
-    const header = pageHeading("Uso e adoção", "Quantos motoristas usam a leitura, quanto usam e o que ela entrega. O uso é medido desde 01/09/2026.", periodControl());
-    const gate = metricGate("adoption", "Medindo o uso da leitura…");
-    if (gate) return header + gate;
-    const a = state.adoption, k = a.kpis || {}, daily = daysSinceUsage(state.adoption, state.adoption.daily || []);
-    const comparable = previousComparable(a);
-    const tiles = `<section class="metric-grid metric-grid--five kpi-grid">
-      ${kpiTile({ label: "Ativos hoje", value: count(k.dau), foot: `<strong>${count(k.wau)}</strong> em 7 dias · ${count(k.mau)} em 30 dias`, tone: "green", iconName: "heart-pulse", hint: "Contas com a leitura ligada hoje" })}
-      ${kpiTile({ label: "Ativos no período", value: count(k.active), delta: deltaChip(k.active, k.active_prev, { comparable }), foot: `média de <strong>${esc(String(k.avg_daily_active ?? 0).replace(".", ","))}</strong> por dia`, spark: daily.map((day) => day.active), tone: "blue", iconName: "users" })}
-      ${kpiTile({ label: "Horas de leitura", value: hours(k.hours_ms), delta: deltaChip(k.hours_ms, k.hours_prev_ms, { format: hours, minBase: 20 * 3_600_000, comparable }), foot: `${esc(hours(asNumber(k.hours_ms) / Math.max(1, asNumber(k.active))))} por usuário ativo`, spark: daily.map((day) => day.hours_ms), tone: "purple", iconName: "clock" })}
-      ${kpiTile({ label: "Corridas finalizadas", value: count(k.finished), delta: deltaChip(k.finished, k.finished_prev, { comparable }), foot: `de ${count(k.read)} solicitações lidas`, spark: daily.map((day) => day.finished), tone: "yellow", iconName: "check-circle" })}
-      ${kpiTile({ label: "Gain IA", value: count(k.ia_requests), delta: deltaChip(k.ia_requests, k.ia_requests_prev, { comparable }), foot: `<strong>${count(k.ia_users)}</strong> ${asNumber(k.ia_users) === 1 ? "pessoa usou" : "pessoas usaram"}`, spark: daily.map((day) => day.ia), tone: "purple", iconName: "message" })}
-    </section>`;
-    const activeChart = panel("Usuários ativos por dia", "Contas com a leitura ligada no dia", timeChart("adoption-active", { days: daily.map((day) => day.d), series: [{ name: "usuários ativos", color: "var(--green)", values: daily.map((day) => day.active) }], extra: [{ name: "de leitura", values: daily.map((day) => day.hours_ms), format: hours }, { name: "perguntas à Gain IA", values: daily.map((day) => day.ia) }], label: "Usuários ativos por dia" }));
-    const ridesChart = panel("Corridas finalizadas por dia", "Corridas que o app acompanhou do aceite ao fim", timeChart("adoption-finished", { days: daily.map((day) => day.d), series: [{ name: "corridas finalizadas", color: "var(--blue)", values: daily.map((day) => day.finished) }], kind: "columns", extra: [{ name: "solicitações lidas", values: daily.map((day) => day.read) }], label: "Corridas finalizadas por dia" }));
-    const platforms = a.platforms || [];
-    const platformMax = Math.max(1, ...platforms.map((item) => asNumber(item.read)));
-    const platformPanel = panel("Plataformas", `Solicitações lidas ${periodCopy()}`, platforms.length ? `<div class="bar-list">${platforms.map((item) => bar(item.name, item.read, platformMax, "var(--blue)", `${count(item.finished)} finalizadas · ${count(item.accounts)} ${asNumber(item.accounts) === 1 ? "conta" : "contas"}`)).join("")}</div>` : plainNotice("Nenhuma solicitação lida no período.", "info"));
+  /* Estados de uso, pelo último dia com a leitura ligada (vêm do servidor). */
+  const USE_STATES = [
+    ["usando", "Usando", "usou nos últimos 7 dias", "green"],
+    ["esfriando", "Esfriando", "7 a 13 dias sem usar", "yellow"],
+    ["sumindo", "Sumindo", "14 a 29 dias sem usar", "red"],
+    ["dormindo", "Dormindo", "30 dias ou mais sem usar", "neutral"]
+  ];
+
+  /* Recursos que o motorista escolhe usar, e de onde vem o sinal de cada um:
+     contadores (events) e tempo de tela (screens). `next` = só passa a ser
+     medido a partir da versão do app que envia o diário por dia. */
+  const FEATURES = [
+    { label: "Menu do ícone flutuante", events: ["menu_opened"] },
+    { label: "Conferir o endereço da corrida", events: ["address_check_opened"] },
+    { label: "Últimas solicitações", events: ["last_requests_opened"], screens: ["Solicitações"] },
+    { label: "Aceitar pela janela do Gain", events: ["accept_tapped"] },
+    { label: "Financeiro", screens: ["Financeiro"] },
+    { label: "Extrato", events: ["home_statement_tapped"], screens: ["Extrato"] },
+    { label: "Lançar entrada", events: ["home_entry_tapped"], screens: ["Nova Entrada"] },
+    { label: "Lançar saída", events: ["home_expense_tapped"], screens: ["Nova Saída"] },
+    { label: "Relatórios", screens: ["Relatórios"] },
+    { label: "Resumo da sessão", screens: ["Resumo da Sessão"] },
+    { label: "Histórico", events: ["home_history_tapped"], screens: ["Histórico"] },
+    { label: "Endereços salvos", events: ["home_addresses_tapped"], screens: ["Endereços"] },
+    { label: "Veículo e custos", screens: ["Veículo", "Controle · Veículo"] },
+    { label: "Valores de aceitação", screens: ["Controle · Valores de Aceitação"] },
+    { label: "Metas", screens: ["Controle · Metas"] },
+    { label: "Receber via Pix", events: ["home_pix_tapped"], screens: ["Receber via Pix"] },
+    { label: "Gravação de tela", events: ["screen_recording_requested"] },
+    { label: "Indique e ganhe", events: ["home_referrals_tapped"] },
+    { label: "Compartilhar o app", events: ["home_share_tapped"] },
+    { label: "Ajustes", screens: ["Ajustes", "Configuração Geral"] },
+    { label: "Gain IA", events: ["assistant_opened"], next: true },
+    { label: "Copiloto por voz", events: ["copilot_started"], next: true },
+    { label: "Novidades", events: ["news_opened"], next: true },
+    { label: "Tela de planos", events: ["plans_opened"], next: true },
+    { label: "Resumo da semana", events: ["weekly_recap_opened"], next: true }
+  ];
+  const FEATURE_BY_EVENT = new Map(FEATURES.flatMap((feature) => (feature.events || []).map((key) => [key, feature.label])));
+
+  const WINBACK_TEMPLATES = [
+    ["Para quem parou de usar", "Oi, (nome)! Aqui é a Gain IA, assistente do Gain Calculator. Notei que você não usou mais o app e queria entender o que aconteceu, para a gente melhorar. O que mais pesou para você parar?", ["Não funcionou bem", "Não vi vantagem", "Achei caro"]],
+    ["Para quem criou a conta e não começou", "Oi, (nome)! Aqui é a Gain IA, assistente do Gain Calculator. Vi que você criou sua conta, mas ainda não começou a usar a leitura das corridas. Travou em algum passo ou ficou alguma dúvida? Me conta que eu te ajudo agora.", ["Não consegui configurar", "Fiquei com receio", "Ainda vou testar"]]
+  ];
+
+  /* 28 quadradinhos, um por dia: mais verde, mais horas de leitura. Amarelo é
+     dia com a leitura ligada por 1 h ou mais sem nenhuma solicitação lida. */
+  function heatStrip(row, start) {
+    const days = row.days || [], read = row.read || [], fin = row.fin || [];
+    const base = dayDate(start).getTime();
+    const cells = Array.from({ length: 28 }, (_, index) => {
+      const minutes = asNumber(days[index]);
+      const level = minutes <= 0 ? 0 : minutes < 30 ? 1 : minutes < 120 ? 2 : minutes < 300 ? 3 : 4;
+      const blind = minutes >= 60 && asNumber(read[index]) === 0;
+      const date = new Date(base + index * DAY_MS).toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" });
+      const title = minutes ? `${date} · ${hours(minutes * 60_000)} de leitura · ${blind ? "nada lido" : `${count(read[index])} lidas, ${count(fin[index])} finalizadas`}` : `${date} · sem uso`;
+      return `<i class="heat heat-${level}${blind ? " is-blind" : ""}${index % 7 === 6 ? " is-week-end" : ""}" title="${esc(title)}"></i>`;
+    }).join("");
+    return `<span class="heat-strip" role="img" aria-label="${count(days.filter((value) => asNumber(value) > 0).length)} dias com leitura nos últimos 28">${cells}</span>`;
+  }
+
+  function ratioDots(kept, total) {
+    const size = Math.min(asNumber(total), 24);
+    const on = total ? Math.round(asNumber(kept) * size / asNumber(total)) : 0;
+    return `<span class="dots" aria-hidden="true">${Array.from({ length: size }, (_, index) => `<i class="${index < on ? "is-on" : ""}"></i>`).join("")}</span>`;
+  }
+
+  function renderKeep(returning) {
+    const r = returning || {};
+    const item = (title, kept, total, wait) => `<div class="keep-item"><span class="keep-title">${esc(title)}</span>${asNumber(total) ? `${ratioDots(kept, total)}<strong>${count(kept)} de ${count(total)}</strong>` : `<strong class="keep-wait">${esc(wait)}</strong>`}</div>`;
+    return panel("Quem começa, continua?", "De quem ligou a leitura pelo menos uma vez desde 01/09/2026", `<div class="keep-row">${item("Voltaram num segundo dia", r.second_day, r.used, "ninguém usou ainda")}${item("Seguiam depois de uma semana", r.week_kept, r.week_eligible, "ninguém completou uma semana")}${item("Seguiam depois de um mês", r.month_kept, r.month_eligible, "ninguém completou um mês")}</div>`);
+  }
+
+  function renderUsePeople(people, start) {
+    const used = people.filter((row) => row.state !== "nunca");
+    const order = { usando: 0, esfriando: 1, sumindo: 2, dormindo: 3 };
+    const filter = USE_STATES.some(([key]) => key === state.useState) ? state.useState : "all";
+    const rows = used.filter((row) => filter === "all" || row.state === filter)
+      .sort((a, b) => order[a.state] - order[b.state] || asNumber(b.mon_last_ms) - asNumber(a.mon_last_ms));
+    const chips = [["all", "Todos"], ...USE_STATES].map(([value, label, hint]) => {
+      const total = value === "all" ? used.length : used.filter((row) => row.state === value).length;
+      return `<button class="filter-chip" type="button" data-use-state="${value}" aria-pressed="${filter === value}"${hint ? ` title="${esc(hint)}"` : ""}>${esc(label)} <span class="chip-count">${count(total)}</span></button>`;
+    }).join("");
+    const list = rows.length ? `<div class="use-list">${rows.map((row) => {
+      const [, stateLabel, , tone] = USE_STATES.find(([key]) => key === row.state) || [null, row.state, "", "neutral"];
+      const stopped = row.state !== "usando";
+      const cause = stopped && row.cause ? STOP_CAUSES[row.cause] : null;
+      const openedAfter = stopped && asNumber(row.last_seen_ms) > asNumber(row.mon_last_ms) + DAY_MS;
+      const opened = !stopped ? "" : openedAfter
+        ? `<span class="use-note use-note--warm">abriu o app ${esc(agoCopy(row.last_seen_ms))}, sem ligar a leitura</span>`
+        : `<span class="use-note">não abre o app desde ${esc(shortDate(Math.max(asNumber(row.last_seen_ms), asNumber(row.mon_last_ms))))}</span>`;
+      const before = stopped ? [...new Set((row.last_used || []).map((key) => FEATURE_BY_EVENT.get(key)).filter(Boolean))].slice(0, 3) : [];
+      const beforeCopy = before.length ? `<span class="use-note">antes de parar usava: ${esc(before.join(", "))}</span>` : "";
+      const badges = personBadges(row);
+      const why = cause || opened || beforeCopy || badges ? `<div class="use-why">${cause ? `<span class="use-cause" title="${esc(cause[1])}">${icon("info")}${esc(cause[0])}</span>` : ""}${opened}${beforeCopy}${badges}</div>` : "";
+      return `<div class="use-row use-row--${esc(row.state)}">
+        <span class="use-person">${personCell(row)}</span>
+        <span class="use-state">${pill(stateLabel, tone)}${row.is_new ? pill("novo", "blue") : ""}${row.returned ? pill("voltou", "purple") : ""}</span>
+        ${heatStrip(row, start)}
+        <span class="use-facts"><span class="cell-primary">${plural(row.mon_days, "dia", "dias")} · ${esc(hours(row.mon_ms))}</span><span class="cell-secondary">último uso ${esc(agoCopy(row.mon_last_ms))} · ${plural(row.finished, "finalizada", "finalizadas")}</span></span>
+        ${contactActions(row)}
+        ${why}
+      </div>`;
+    }).join("")}</div>` : plainNotice(filter === "all" ? "Ninguém ligou a leitura desde 01/09/2026." : "Ninguém neste grupo.", "info");
+    const legend = `<p class="heat-legend"><span>Cada quadradinho é um dia, do mais antigo (esquerda) a hoje.</span><span class="heat-scale">menos <i class="heat heat-1"></i><i class="heat heat-2"></i><i class="heat heat-3"></i><i class="heat heat-4"></i> mais horas de leitura</span><span class="heat-scale"><i class="heat heat-2 is-blind"></i> leitura ligada e nada lido</span></p>`;
+    return panel("Motoristas, um a um", "Os últimos 28 dias de cada pessoa que já ligou a leitura", `<div class="filter-row">${chips}</div>${list}${legend}`, "", "use-panel");
+  }
+
+  function renderWhyStopped(people) {
+    const stopped = people.filter((row) => ["esfriando", "sumindo", "dormindo"].includes(row.state));
+    const copy = "O que os dados sugerem. O motivo de verdade só a pessoa conta";
+    if (!stopped.length) return panel("Por que pararam", copy, plainNotice("Ninguém parou de usar. Bom sinal."));
+    const groups = Object.keys(STOP_CAUSES).map((key) => ({ key, rows: stopped.filter((row) => (row.cause || "sem_pista") === key) })).filter((group) => group.rows.length).sort((a, b) => b.rows.length - a.rows.length);
+    const answered = stopped.filter((row) => row.talk?.reason);
+    const said = answered.length
+      ? `<p class="wb-sub">O que responderam pelo WhatsApp</p><div class="why-list">${Object.entries(answered.reduce((total, row) => { total[row.talk.reason] = (total[row.talk.reason] || []).concat(row); return total; }, {})).sort((a, b) => b[1].length - a[1].length).map(([reason, rows]) => `<div class="why-item"><span class="why-count why-count--said">${count(rows.length)}</span><h4>${esc(TALK_REASONS[reason] || reason)}</h4><div class="why-people">${rows.map((row) => personBubble(row)).join("")}</div></div>`).join("")}</div>`
+      : `<p class="chart-caption">Ninguém respondeu ainda. As conversas de retorno, ao lado, perguntam pelo WhatsApp e trazem a resposta para cá.</p>`;
+    return panel("Por que pararam", copy, `<div class="why-list">${groups.map((group) => `<div class="why-item"><span class="why-count">${count(group.rows.length)}</span><h4>${esc(STOP_CAUSES[group.key][0])}</h4><p>${esc(STOP_CAUSES[group.key][1])}</p><div class="why-people">${group.rows.map((row) => personBubble(row)).join("")}</div></div>`).join("")}</div>${said}`);
+  }
+
+  function renderTalk(talk) {
+    const [label, tone] = TALK_STATUS[talk.status] || [talk.status, "neutral"];
+    const open = state.talkOpen.has(String(talk.id));
+    const messages = (talk.messages || []).map((message) => `<div class="wb-msg wb-msg--${message.r === "in" ? "in" : "out"}"><p>${esc(message.t)}</p><small>${esc(dateTime(message.at))}</small></div>`).join("");
+    const result = talk.reason ? `<p class="wb-result"><strong>${esc(TALK_REASONS[talk.reason] || talk.reason)}</strong>${talk.would_return ? ` · voltaria se: ${esc(talk.would_return)}` : ""}${talk.needs_human ? ` · ${pill("pede contato seu", "yellow")}` : ""}</p>` : "";
+    return `<article class="wb-talk"><div class="wb-talk-head"><button class="wb-who" type="button" data-open-user-id="${esc(talk.user_id)}" title="Abrir a conta">${personCell(talk)}</button>${pill(label, tone)}<button class="text-button" type="button" data-talk-toggle="${esc(talk.id)}" aria-expanded="${open}">${open ? "Fechar" : "Ver conversa"}</button></div>${result}${talk.summary ? `<p class="wb-summary">${esc(talk.summary)}</p>` : ""}${talk.error ? `<p class="wb-summary">Falha no envio: ${esc(talk.error)}</p>` : ""}${open ? `<div class="wb-chat">${messages || '<p class="wb-summary">Sem mensagens registradas.</p>'}</div>` : ""}</article>`;
+  }
+
+  function renderWinback() {
+    const title = "Conversas de retorno";
+    const copy = "A Gain IA pergunta pelo WhatsApp oficial por que a pessoa parou e anota a resposta na conta";
+    const w = state.winback;
+    if (!w) return panel(title, copy, state.errors.winback ? errorState(state.errors.winback, "winback") : loadingState("Carregando as conversas…"));
+    const config = w.config || {}, totals = w.totals || {}, next = w.next || [], talks = w.conversations || [];
+    const on = !!config.enabled;
+    const toggle = `<button class="button button--compact ${on ? "button--secondary" : "button--primary"}" type="button" data-winback-toggle="${on ? "off" : "on"}">${on ? "Pausar envio" : "Ligar envio automático"}</button>`;
+    const status = `<div class="wb-status wb-status--${on ? "on" : "off"}"><i></i><span>${on ? `Ligado: até ${count(config.daily_limit)} primeiras mensagens por dia, de segunda a sábado, das 10h às 19h.` : "Desligado: nenhuma mensagem sai sozinha. Respostas de conversas já abertas continuam sendo atendidas."}</span></div>`;
+    const facts = `<div class="wb-facts"><div><strong>${count(totals.sent)}</strong><span>enviadas</span></div><div><strong>${count(totals.replied)}</strong><span>responderam</span></div><div><strong>${count(totals.closed)}</strong><span>concluídas</span></div><div><strong>${count(next.length)}</strong><span>na fila</span></div></div>`;
+    const queue = next.length
+      ? `<p class="wb-sub">Próximos a receber</p><div class="wb-queue">${next.slice(0, 10).map((row) => `<button class="wb-next" type="button" data-open-user-id="${esc(row.user_id)}" title="Abrir a conta"><span class="avatar">${esc(initials(row.name, row.email))}</span><span><strong>${esc(shortName(row))}</strong><small>${row.kind === "parou" ? `parou há ${count(row.idle_days)} dias` : `conta há ${count(row.signup_days)} dias, sem usar`}</small></span></button>`).join("")}</div>`
+      : `<p class="wb-sub">Ninguém na fila agora.</p>`;
+    const list = talks.length ? `<p class="wb-sub">Conversas</p>${talks.map(renderTalk).join("")}` : "";
+    const templates = `<details class="wb-details"><summary>Ver a mensagem que abre a conversa</summary>${WINBACK_TEMPLATES.map(([name, text, buttons]) => `<div class="wb-template"><span>${esc(name)}</span><p>${esc(text)}</p><div class="wb-buttons">${buttons.map((label) => `<i>${esc(label)}</i>`).join("")}</div></div>`).join("")}<p class="chart-caption">Só para telefone verificado, uma abordagem por pessoa. Depois da resposta a Gain IA faz no máximo três mensagens curtas, encerra e grava o resumo nas observações da conta. Quem responde SAIR não recebe mais.</p></details>`;
+    return panel(title, copy, status + facts + queue + list + templates, toggle, "wb-panel");
+  }
+
+  async function toggleWinback(turnOn) {
+    if (turnOn) {
+      const waiting = (state.winback?.next || []).length, limit = asNumber(state.winback?.config?.daily_limit, 6);
+      if (!await askConfirm({ title: "Ligar as conversas de retorno?", message: `O WhatsApp oficial do Gain passa a enviar sozinho a primeira mensagem para quem parou de usar ou criou a conta e não começou, só para telefones verificados: até ${limit} por dia, de segunda a sábado, entre 10h e 19h. Há ${waiting} ${waiting === 1 ? "pessoa" : "pessoas"} na fila agora. Cada pessoa recebe uma abordagem só.`, label: "Ligar envio" })) return;
+    }
+    try {
+      const result = await rpc("admin_winback_set", { p_enabled: turnOn, p_daily_limit: null });
+      if (result.status !== "ok") throw new Error("Sem permissão para alterar o envio.");
+      toast(turnOn ? "Envio automático ligado" : "Envio automático pausado", "success", turnOn ? "A primeira leva sai na próxima hora cheia do horário de envio." : "Conversas em andamento continuam sendo respondidas.");
+      loadWinback({ quiet: true });
+    } catch (error) {
+      toast("Não foi possível alterar o envio", "error", error?.message || "");
+    }
+  }
+
+  function featureRows(features, mode) {
+    const recent = mode === "recent";
+    const events = new Map((features?.events || []).map((item) => [item.key, item]));
+    const screens = new Map((features?.screens || []).map((item) => [item.name, item]));
+    return FEATURES.map((feature) => {
+      const fromEvents = (feature.events || []).map((key) => events.get(key)).filter(Boolean);
+      const fromScreens = (feature.screens || []).map((key) => screens.get(key)).filter(Boolean);
+      const accounts = Math.max(0, ...fromEvents.concat(fromScreens).map((item) => asNumber(recent ? item.recent_accounts : item.accounts)));
+      const uses = fromEvents.reduce((sum, item) => sum + asNumber(recent ? item.recent_total : item.total), 0);
+      const ms = fromScreens.reduce((sum, item) => sum + asNumber(recent ? item.recent_ms : item.ms), 0);
+      return { ...feature, accounts, uses, ms };
+    });
+  }
+
+  function renderFeatures(features) {
+    const hasRecent = asNumber(features?.recent_base) > 0;
+    const mode = state.featureMode === "recent" && hasRecent ? "recent" : "ever";
+    const base = asNumber(mode === "recent" ? features?.recent_base : features?.base);
+    const toggle = `<div class="segmented" role="group" aria-label="Janela dos recursos"><button type="button" data-feature-mode="ever" aria-pressed="${mode === "ever"}">Desde a instalação</button><button type="button" data-feature-mode="recent" aria-pressed="${mode === "recent"}"${hasRecent ? "" : ' disabled title="Chega com a próxima versão do app, que passa a enviar o uso por dia"'}>Últimos 28 dias</button></div>`;
+    if (!base) return panel("O que usam e o que ninguém usa", "Recursos do app, por quantas contas já usaram", plainNotice("Nenhuma conta sincronizou o uso dos recursos ainda.", "info"), toggle);
+    const rows = featureRows(features, mode);
+    const measured = rows.filter((row) => !(row.next && !row.accounts));
+    const used = measured.filter((row) => row.accounts >= 2).sort((a, b) => b.accounts - a.accounts || b.uses - a.uses);
+    const ignored = measured.filter((row) => row.accounts < 2);
+    const coming = rows.filter((row) => row.next && !row.accounts);
+    const detail = (row) => [row.uses ? `${count(row.uses)} usos` : "", row.ms ? `${hours(row.ms)} na tela` : ""].filter(Boolean).join(" · ");
+    const bars = (list) => `<div class="bar-list">${list.map((row) => `<div title="${esc(detail(row))}">${bar(row.label, row.accounts, base, row.accounts * 3 >= base ? "var(--green)" : "var(--blue)", `de ${count(base)} contas`)}</div>`).join("")}</div>`;
+    const half = Math.ceil(used.length / 2);
+    const columns = used.length ? `<div class="feat-grid">${bars(used.slice(0, half))}${bars(used.slice(half))}</div>` : plainNotice("Nenhum recurso usado por duas contas ou mais.", "info");
+    const chips = (list, extra = "") => `<div class="feat-chips">${list.map((row) => `<span class="feat-chip${extra}">${esc(row.label)}${row.accounts ? ` <strong>${count(row.accounts)}</strong>` : ""}</span>`).join("")}</div>`;
+    return panel("O que usam e o que ninguém usa", `${plural(base, "conta sincronizou", "contas sincronizaram")} o uso dos recursos ${mode === "recent" ? "nos últimos 28 dias" : "desde a instalação"}. Verde: um terço da base ou mais`, `${columns}
+      ${ignored.length ? `<p class="feat-sub">Quase ninguém usa <small>nenhuma ou uma conta só</small></p>${chips(ignored, " feat-chip--cold")}` : ""}
+      ${coming.length ? `<p class="feat-sub">Passam a ser medidos na próxima versão do app</p>${chips(coming)}` : ""}`, toggle, "feat-panel");
+  }
+
+  function renderDelivery(a, features) {
     const states = a.states || {};
     const readTotal = REQUEST_STATES.reduce((sum, [key]) => sum + asNumber(states[key]), 0);
-    const statesPanel = panel("O que acontece com as solicitações", "Situação de cada solicitação lida no período", readTotal ? `<div class="bar-list">${REQUEST_STATES.map(([key, label, copy]) => `<div title="${esc(copy)}">${bar(label, states[key], readTotal, key === "finished" ? "var(--green)" : "var(--neutral-mark)", `${pct(states[key], readTotal)}%`)}</div>`).join("")}</div><p class="chart-caption">“Não aceitas” é a maioria por natureza: o motorista vê muitas ofertas e pega poucas.</p>` : plainNotice("Nenhuma solicitação lida no período.", "info"));
-    const stopped = panel("Pararam de usar", "Usavam há 1 a 3 semanas e não ligaram a leitura nos últimos 7 dias", peopleList(a.stopped || [], (row) => `${row.paying ? pill("pagante", "green") : ""}<small>último uso ${esc(relative(row.mon_last_ms).toLowerCase())} · ${count(row.mon_days)} ${asNumber(row.mon_days) === 1 ? "dia" : "dias"} de uso</small>`, "Ninguém parou de usar nas últimas semanas."));
-    const silent = panel("Monitoram e nada é lido", "2 h ou mais de leitura nos últimos 7 dias sem nenhuma solicitação", peopleList(a.silent || [], (row) => `<small>${esc(hours(row.week_ms))} na semana · app ${esc(row.app_name || "—")}</small>`, "Toda conta que monitorou leu solicitações. Bom sinal."));
-    const top = panel("Quem mais usa", `Corridas finalizadas com o app ${periodCopy()}`, peopleList(a.top || [], (row) => `${row.paying ? pill("pagante", "green") : ""}<small>${count(row.finished)} finalizadas · ${count(row.days)} ${asNumber(row.days) === 1 ? "dia" : "dias"} · ${esc(hours(row.hours_ms))}</small>`, "Ninguém usou a leitura no período.", 10));
+    const events = new Map((features?.events || []).map((item) => [item.key, asNumber(item.total)]));
+    const confirmed = events.get("ride_finish_confirmed") || 0, unconfirmed = events.get("ride_finish_unconfirmed") || 0;
+    const platforms = a.platforms || [];
+    const platformMax = Math.max(1, ...platforms.map((item) => asNumber(item.read)));
+    const flow = `<div class="flow"><div class="flow-step"><strong>${count(readTotal)}</strong><span>solicitações lidas ${esc(periodCopy())}</span></div>${icon("arrow-right", "icon flow-arrow")}<div class="flow-step"><strong>${count(states.finished)}</strong><span>corridas acompanhadas até o fim</span></div>${icon("arrow-right", "icon flow-arrow")}<div class="flow-step"><strong>${confirmed + unconfirmed ? `${pct(confirmed, confirmed + unconfirmed)}%` : "—"}</strong><span>dos fins de corrida confirmados na tela (desde a instalação)</span></div></div>`;
+    const bars = platforms.length ? `<div class="bar-list">${platforms.map((item) => bar(item.name, item.read, platformMax, "var(--blue)", `${count(item.finished)} finalizadas · ${plural(item.accounts, "conta", "contas")}`)).join("")}</div>` : plainNotice("Nenhuma solicitação lida no período.", "info");
+    return panel("O que a leitura entrega", "Do que o app leu ao que acompanhou até o fim, por plataforma", flow + bars);
+  }
+
+  function renderAdoption() {
+    const header = pageHeading("Uso e adoção", "Quem usa, quem esfriou, por que pararam e o que cada um usa no app. O uso é medido desde 01/09/2026.", periodControl());
+    const gate = metricGate("adoption", "Medindo o uso da leitura…");
+    if (gate) return header + gate;
+    if (!state.map) return header + (state.errors.map ? errorState(state.errors.map, "map") : loadingState("Montando o mapa de uso…"));
+    const a = state.adoption, k = a.kpis || {}, map = state.map;
+    const people = map.people || [];
+    const by = (key) => people.filter((row) => row.state === key);
+    const using = by("usando"), cooling = by("esfriando"), fading = by("sumindo"), asleep = by("dormindo"), never = by("nunca");
+    const stopped = cooling.concat(fading, asleep);
+    const usedEver = using.length + stopped.length;
+    const returning = map.returning || {};
+    const seeGroup = (value, label) => `<button class="text-button" type="button" data-use-state="${value}">${esc(label)} ${icon("arrow-right")}</button>`;
+
+    const good = [], bad = [];
+    if (using.length) good.push({ title: `${plural(using.length, "motorista usando", "motoristas usando")} esta semana`, copy: `${nameList(using, 4)}. Juntos, ${esc(hours(k.hours_ms))} de leitura ${esc(periodCopy())}.` });
+    const loyal = using.filter((row) => asNumber(row.mon_days) >= 10);
+    if (loyal.length) good.push({ title: `${plural(loyal.length, "já passou", "já passaram")} de 10 dias de uso`, copy: `É quem prova que o app se sustenta no dia a dia: ${nameList(loyal, 4)}.` });
+    if (asNumber(returning.week_eligible) >= 2 && returning.week_kept / returning.week_eligible >= 0.6) good.push({ title: "Quem começa, fica", copy: `${count(returning.week_kept)} de ${count(returning.week_eligible)} seguiam usando depois de uma semana, e ${count(returning.month_kept)} de ${count(returning.month_eligible)} depois de um mês.` });
+    const back = people.filter((row) => row.returned);
+    if (back.length) good.push({ title: `${plural(back.length, "pessoa voltou", "pessoas voltaram")} depois de duas semanas sem usar`, copy: `${nameList(back)}.` });
+    /* Corridas acompanhadas: ponto forte só se não caíram; queda de 10% ou
+       mais vai para as perdas, e uma queda pequena não entra em nenhum quadro. */
+    const finishedNow = asNumber(k.finished), finishedBefore = asNumber(k.finished_prev);
+    const finishedComparable = previousComparable(a) && finishedBefore > 0;
+    const finishedFell = finishedComparable && finishedNow < finishedBefore * 0.9;
+    if (finishedNow && (!finishedComparable || finishedNow >= finishedBefore)) good.push({ title: `${plural(finishedNow, "corrida acompanhada", "corridas acompanhadas")} até o fim ${esc(periodCopy())}`, copy: previousComparable(a) ? `Eram ${count(finishedBefore)} no período anterior.` : `De ${count(k.read)} solicitações lidas.` });
+
+    if (!using.length) bad.push({ title: "Ninguém usou a leitura nesta semana", copy: "Nenhuma conta real ligou a leitura nos últimos 7 dias." });
+    if (cooling.length) bad.push({ title: `${plural(cooling.length, "pessoa esfriando", "pessoas esfriando")} agora`, copy: `Entre 7 e 13 dias sem usar: é a melhor hora de falar, ainda lembram do app. ${nameList(cooling)}.`, action: seeGroup("esfriando", "Ver quem são") });
+    const lost = fading.concat(asleep);
+    if (lost.length) {
+      const expired = lost.filter((row) => row.cause === "acesso_venceu").length, blank = lost.filter((row) => row.cause === "sem_pista").length;
+      bad.push({ title: `${plural(lost.length, "pessoa parou", "pessoas pararam")} há duas semanas ou mais`, copy: `${expired ? `${plural(expired, "parou", "pararam")} quando o acesso venceu. ` : ""}${blank ? `${plural(blank, "usou e sumiu", "usaram e sumiram")} sem motivo aparente: só perguntando.` : ""}`.trim() || "Veja a causa provável de cada uma abaixo.", action: seeGroup("sumindo", "Ver quem são") });
+    }
+    if (finishedFell) bad.push({ title: `Menos corridas acompanhadas: ${count(finishedNow)} ${esc(periodCopy())}`, copy: `Eram ${count(finishedBefore)} no período anterior: o uso encolheu.` });
+    const silent = a.silent || [];
+    if (silent.length) bad.push({ title: `${plural(silent.length, "conta com a leitura ligada", "contas com a leitura ligada")} e nada lido`, copy: `2 h ou mais de leitura na semana sem nenhuma solicitação: pode ser falha de leitura no aparelho. ${nameList(silent)}.` });
+    const cold = featureRows(map.features, "ever").filter((row) => !row.next && row.accounts < 2);
+    if (cold.length && asNumber(map.features?.base)) bad.push({ title: `${plural(cold.length, "recurso que quase ninguém usa", "recursos que quase ninguém usa")}`, copy: `${esc(cold.slice(0, 4).map((row) => row.label).join(", "))}${cold.length > 4 ? " e outros" : ""}. Ou falta mostrar, ou não faz falta.` });
+    const outdated = a.versions?.outdated || [];
+    if (outdated.length) bad.push({ title: `${plural(outdated.length, "conta ativa", "contas ativas")} em versão antiga`, copy: `Abaixo da ${esc(String(a.versions.latest))}: correções recentes não chegaram nelas.`, action: `<button class="text-button" type="button" data-nav="broadcast">Mandar um comunicado ${icon("arrow-right")}</button>` });
+
+    const segments = USE_STATES.map(([key, label]) => ({ key, label, n: by(key).length })).filter((item) => item.n);
+    const lifeBar = usedEver ? `<div class="life"><div class="life-bar" role="img" aria-label="${esc(segments.map((item) => `${item.n} ${item.label.toLowerCase()}`).join(", "))}">${segments.map((item) => `<i class="life-${item.key}" style="flex:${item.n}"></i>`).join("")}</div><div class="life-legend">${segments.map((item) => `<button type="button" data-use-state="${item.key}"><i class="life-${item.key}"></i>${count(item.n)} ${esc(item.label.toLowerCase())}</button>`).join("")}</div></div>` : "";
+    const hero = `<section class="hero-line hero-line--stack"><div class="hero-figure"><strong>${count(using.length)}</strong><span>${using.length === 1 ? "motorista usando" : "motoristas usando"} esta semana</span></div><div class="hero-side"><p class="hero-copy">${usedEver ? `De <strong>${plural(usedEver, "pessoa que já ligou", "pessoas que já ligaram")} a leitura</strong>, ${stopped.length === 1 ? "1 parou" : `${count(stopped.length)} pararam`}.` : "Ninguém ligou a leitura desde 01/09/2026."} ${never.length ? `${plural(never.length, "conta nunca ligou", "contas nunca ligaram")}: essas estão em <button class="link-button" type="button" data-nav="growth">Novos usuários</button>.` : ""}</p>${lifeBar}</div></section>`;
+
+    const daily = daysSinceUsage(a, a.daily || []);
+    const activeChart = panel("Motoristas ativos por dia", "Contas com a leitura ligada no dia; passe o mouse para ver horas e corridas", timeChart("adoption-active", { days: daily.map((day) => day.d), series: [{ name: "motoristas ativos", color: "var(--green)", values: daily.map((day) => day.active) }], extra: [{ name: "de leitura", values: daily.map((day) => day.hours_ms), format: hours }, { name: "corridas finalizadas", values: daily.map((day) => day.finished) }, { name: "perguntas à Gain IA", values: daily.map((day) => day.ia) }], label: "Motoristas ativos por dia" }));
     const versions = a.versions || {};
     const versionRows = versions.rows || [];
     const versionMax = Math.max(1, ...versionRows.map((row) => asNumber(row.accounts)));
-    const versionPanel = panel("Versões em uso", "Contas vistas nos últimos 14 dias, pela versão mais nova de cada uma", versionRows.length ? `<div class="bar-list">${versionRows.map((row) => bar(`${row.name || "Desconhecida"}${row.code ? ` (${row.code})` : ""}${asNumber(row.code) === asNumber(versions.latest) ? " · atual" : ""}`, row.accounts, versionMax, asNumber(row.code) === asNumber(versions.latest) ? "var(--green)" : "var(--yellow)")).join("")}</div>${(versions.outdated || []).length ? `<p class="chart-caption">${count(versions.outdated.length)} ${versions.outdated.length === 1 ? "conta ativa está" : "contas ativas estão"} numa versão anterior à ${esc(String(versions.latest))}. Um comunicado pode lembrar de atualizar.</p>` : ""}` : plainNotice("Nenhuma conta informou versão recentemente.", "info"), `<button class="text-button" type="button" data-nav="broadcast">Comunicado ${icon("arrow-right")}</button>`);
+    const versionPanel = panel("Versões em uso", "Contas vistas nos últimos 14 dias, pela versão mais nova de cada uma", versionRows.length ? `<div class="bar-list">${versionRows.map((row) => bar(`${row.name || "Desconhecida"}${row.code ? ` (${row.code})` : ""}${asNumber(row.code) === asNumber(versions.latest) ? " · atual" : ""}`, row.accounts, versionMax, asNumber(row.code) === asNumber(versions.latest) ? "var(--green)" : "var(--yellow)")).join("")}</div>` : plainNotice("Nenhuma conta informou versão recentemente.", "info"));
     const tiers = a.ia_tiers || [];
     const tierMax = Math.max(1, ...tiers.map((row) => asNumber(row.requests)));
-    const iaPanel = panel("Gain IA por plano", `Perguntas respondidas ${periodCopy()}`, tiers.length ? `<div class="bar-list">${tiers.map((row) => bar(TIER_LABELS[row.tier] || row.tier, row.requests, tierMax, "var(--purple)", `${count(row.users)} ${asNumber(row.users) === 1 ? "pessoa" : "pessoas"}`)).join("")}</div>` : plainNotice("Ninguém usou a Gain IA no período.", "info"), `<button class="text-button" type="button" data-nav="assistant">Gain IA ${icon("arrow-right")}</button>`);
-    /* Telas, atalhos e janela de aceite são contadores acumulados no aparelho
-       (sem data): não respondem ao período, por isso ficam numa seção à parte. */
-    const stats = state.statistics;
-    const skeleton = `<article class="panel skeleton" style="min-height:12rem"></article>`;
-    const acceptance = stats ? renderAcceptanceWindow(stats.events || {}) : state.loading.statistics ? skeleton : "";
-    const inApp = stats ? `<section class="content-grid">${renderScreenAnalytics(stats.screens || [])}${renderEventAnalytics(stats.events || {})}</section>` : "";
-    return header + `<div class="biz-page${refreshingClass("adoption")}">${tiles}
-      <section class="content-grid">${activeChart}${ridesChart}</section>
-      <section class="content-grid">${platformPanel}${statesPanel}</section>
-      <section class="content-grid">${stopped}${silent}</section>
-      <section class="content-grid">${top}${versionPanel}</section>
-      <h3 class="section-divider">Dentro do app <small>Gain IA no período; telas, atalhos e janela de aceite acumulados desde a instalação</small></h3>
-      <section class="content-grid">${iaPanel}${acceptance}</section>
-      ${inApp}</div>`;
+    const iaPanel = panel("Gain IA", `${plural(k.ia_users, "pessoa perguntou", "pessoas perguntaram")} ${periodCopy()}, ${plural(k.ia_requests, "pergunta", "perguntas")}`, tiers.length ? `<div class="bar-list">${tiers.map((row) => bar(TIER_LABELS[row.tier] || row.tier, row.requests, tierMax, "var(--purple)", plural(row.users, "pessoa", "pessoas"))).join("")}</div>` : plainNotice("Ninguém usou a Gain IA no período.", "info"), `<button class="text-button" type="button" data-nav="assistant">Gain IA ${icon("arrow-right")}</button>`);
+
+    return header + `<div class="biz-page${refreshingClass("adoption", "map")}">${hero}
+      ${insightBoard(good, bad, "Ainda sem um ponto forte claro no uso.", "Nenhuma perda relevante no uso agora.")}
+      ${renderUsePeople(people, map.window?.start)}
+      <section class="content-grid">${renderWhyStopped(people)}${renderWinback()}</section>
+      ${renderKeep(returning)}
+      ${renderFeatures(map.features)}
+      <section class="content-grid">${activeChart}${renderDelivery(a, map.features)}</section>
+      <section class="content-grid">${versionPanel}${iaPanel}</section></div>`;
+  }
+
+  /* Observações da conta (aba do detalhe) -------------------------------- */
+  function ensureNotesLoaded(account, force = false) {
+    const store = detailStore(account);
+    if (!account.userId || store.loading.notes) return;
+    if (!force && (store.notes !== undefined || store.errors.notes)) return;
+    loadUserDetailField(account, "notes", () => rpc("admin_user_notes_list", { p_user_id: account.userId }), (result) => {
+      if (result.status !== "ok") throw new Error("Não foi possível consultar as observações desta conta.");
+      return result.notes || [];
+    });
+  }
+
+  function renderUserNotes(account, store) {
+    ensureNotesLoaded(account);
+    const form = `<div class="note-form"><textarea id="user-note-text" class="note-input" rows="3" maxlength="4000" placeholder="O que você soube desta pessoa? Ex.: liguei e ela disse que volta quando trocar de celular.">${esc(store.noteDraft || "")}</textarea><button class="button button--primary button--compact" type="button" data-note-add="${esc(account.key)}">Guardar observação</button></div>`;
+    if (store.errors.notes) return form + `<div class="notice notice--danger">${icon("alert")}<span>${esc(store.errors.notes)}</span></div>`;
+    if (store.notes === undefined) return form + loadingState("Carregando as observações…");
+    const list = store.notes.length
+      ? `<div class="note-list">${store.notes.map((note) => `<article class="note-card note-card--${note.source === "winback" ? "ia" : "manual"}"><header><span>${icon(note.source === "winback" ? "message" : "bookmark")}${note.source === "winback" ? "Gain IA · conversa pelo WhatsApp" : "Observação sua"}</span><small>${esc(dateTime(note.created_ms))}</small><button class="icon-button icon-button--sm icon-button--danger" type="button" data-note-delete="${esc(note.id)}" data-account="${esc(account.key)}" title="Apagar observação" aria-label="Apagar observação">${icon("trash")}</button></header><p>${esc(note.body)}</p></article>`).join("")}</div>`
+      : `<div class="notice"><span>Nenhuma observação ainda. O resultado das conversas de retorno pelo WhatsApp também fica guardado aqui.</span></div>`;
+    return form + list;
+  }
+
+  async function addUserNote(account) {
+    if (!account?.userId) return;
+    const store = detailStore(account);
+    const body = String($("user-note-text")?.value || "").trim();
+    if (!body) return toast("Escreva a observação antes de guardar", "error");
+    try {
+      const result = await rpc("admin_user_note_add", { p_user_id: account.userId, p_body: body });
+      if (result.status !== "ok") throw new Error("O servidor recusou a observação.");
+      store.noteDraft = "";
+      toast("Observação guardada");
+      ensureNotesLoaded(account, true);
+      if (state.map) loadMap({ quiet: true });
+    } catch (error) {
+      toast("Não foi possível guardar", "error", error?.message || "");
+    }
+  }
+
+  async function deleteUserNote(account, id) {
+    if (!account) return;
+    if (!await askConfirm({ title: "Apagar esta observação?", message: "Ela some da conta. A conversa pelo WhatsApp, se houver, continua guardada em Uso e adoção.", label: "Apagar", danger: true })) return;
+    try {
+      const result = await rpc("admin_user_note_delete", { p_id: asNumber(id) });
+      if (result.status !== "ok") throw new Error("A observação não foi encontrada.");
+      toast("Observação apagada");
+      ensureNotesLoaded(account, true);
+      if (state.map) loadMap({ quiet: true });
+    } catch (error) {
+      toast("Não foi possível apagar", "error", error?.message || "");
+    }
   }
 
   /* Saúde e diagnósticos (usados na visão geral e no menu) --------------- */
@@ -1545,7 +1996,7 @@
     const license = licenseState(account.expiry, account.lifetime);
     const tabs = account.isOrphan
       ? [["devices", "Aparelho"]]
-      : [["summary", "Resumo"], ["activity", "Uso"], ["devices", "Dispositivos"], ["license", "Licença e dados"], ...(account.isTester ? [["trace", "Rastro"]] : [])];
+      : [["summary", "Resumo"], ["activity", "Uso"], ["notes", "Observações"], ["devices", "Dispositivos"], ["license", "Licença e dados"], ...(account.isTester ? [["trace", "Rastro"]] : [])];
     const tags = `${pill(license.label, license.tone)}${account.isRobot ? '<span class="tag">robô da Google</span>' : ""}${account.isTester ? '<span class="tag">envia rastro</span>' : ""}${account.isInternal ? '<span class="tag">conta interna</span>' : ""}${account.isOrphan ? '<span class="tag">sem conta</span>' : ""}`;
     els.detailContent.innerHTML = `<header class="detail-top"><button class="icon-button" data-close-detail aria-label="Fechar detalhe">${icon("x")}</button><div class="detail-top-copy"><span class="eyebrow">${account.isOrphan ? "Aparelho legado" : "Detalhe da conta"}</span><h2 id="detail-title">${esc(account.name || account.email || account.devices[0]?.name || "Sem identificação")}</h2></div><button class="icon-button" data-refresh-user="${esc(account.key)}" aria-label="Atualizar conta">${icon("refresh")}</button></header>
       <div class="detail-body"><section class="identity-card"><span class="avatar ${isOnline(account.lastSeen) ? "is-online" : ""}">${esc(initials(account.name, account.email || account.devices[0]?.name))}</span><div class="identity-copy"><h3>${esc(account.name || account.email || "Aparelho sem conta")}</h3><p>${esc(account.email || account.userId || account.devices[0]?.hash || "Sem identificação")}</p></div><div class="tags">${tags}</div></section>
@@ -1556,6 +2007,7 @@
   function renderUserDetailTab(account, store) {
     if (state.detailTab === "summary") return renderUserSummary(account, store);
     if (state.detailTab === "activity") return renderUserActivity(account, store);
+    if (state.detailTab === "notes") return renderUserNotes(account, store);
     if (state.detailTab === "devices") return renderUserDevices(account, store);
     if (state.detailTab === "license") return renderUserLicense(account, store);
     if (state.detailTab === "trace") return renderUserTrace(account, store);
@@ -1913,30 +2365,6 @@
       toast("Estado do diagnóstico atualizado");
       openDiagnostic(id); renderCurrentPage(); syncNavBadges();
     } catch (error) { toast("Não foi possível atualizar o diagnóstico", "error", error.message); }
-  }
-
-  /* Uso e adoção --------------------------------------------------------- */
-  const EVENT_LABELS = {
-    accept_shown: "Janela de aceite exibida", accept_tapped: "Aceitar tocado", accept_dismissed: "Janela dispensada", accept_expired: "Janela expirada",
-    home_entry_tapped: "Atalho de entrada", home_expense_tapped: "Atalho de saída", home_statement_tapped: "Atalho de extrato", home_addresses_tapped: "Atalho de endereços", home_pix_tapped: "Atalho de Pix", home_share_tapped: "Atalho de compartilhar", home_referrals_tapped: "Atalho de indicações",
-    ride_accepted: "Corrida aceita", ride_finished: "Corrida finalizada", ride_rejected: "Corrida recusada", ride_canceled: "Corrida cancelada", ride_missed: "Corrida perdida"
-  };
-
-  function renderAcceptanceWindow(events) {
-    const shown = asNumber(events.accept_shown), tapped = asNumber(events.accept_tapped), rate = pct(tapped, shown);
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Janela de aceite</h3><p class="section-copy">Interação medida desde a instrumentação</p></div></div>${shown ? `<div class="donut-layout"><div class="donut" style="--value:${rate};--donut-color:var(--purple)"><span class="donut-copy"><strong>${rate}%</strong><small>toques</small></span></div><div class="donut-legend"><div class="legend-row"><span class="legend-dot" style="--legend-color:var(--purple)"></span>Exibições<strong>${count(shown)}</strong></div><div class="legend-row"><span class="legend-dot" style="--legend-color:var(--green)"></span>Toques<strong>${count(tapped)}</strong></div><div class="legend-row"><span class="legend-dot" style="--legend-color:var(--muted)"></span>Dispensadas<strong>${count(events.accept_dismissed)}</strong></div><div class="legend-row"><span class="legend-dot" style="--legend-color:var(--yellow)"></span>Expiradas<strong>${count(events.accept_expired)}</strong></div></div></div>` : `<div class="notice"><span>Sem exibições medidas ainda. Isso é diferente de uma taxa de 0%.</span></div>`}</article>`;
-  }
-
-  function renderScreenAnalytics(screens) {
-    const list = [...screens].sort((a, b) => asNumber(b.ms) - asNumber(a.ms)).slice(0, 12);
-    const maximum = Math.max(1, ...list.map((item) => asNumber(item.ms)));
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Telas por permanência</h3><p class="section-copy">Acumulado sincronizado pela base</p></div></div>${list.length ? `<div class="bar-list">${list.map((item) => bar(item.name || "Sem nome", item.ms, maximum, "var(--blue)", `${count(item.hits)} visitas`, duration(item.ms, true))).join("")}</div>` : `<div class="notice"><span>Sem tempo de tela sincronizado.</span></div>`}</article>`;
-  }
-
-  function renderEventAnalytics(events) {
-    const list = Object.entries(events).filter(([, value]) => asNumber(value) > 0).sort((a, b) => asNumber(b[1]) - asNumber(a[1])).slice(0, 16);
-    const maximum = Math.max(1, ...list.map(([, value]) => asNumber(value)));
-    return `<article class="panel"><div class="panel-head"><div><h3 class="section-title">Interações e eventos</h3><p class="section-copy">Mistura ações explícitas e eventos automáticos do ciclo de corrida</p></div></div>${list.length ? `<div class="bar-list">${list.map(([name, value]) => bar(EVENT_LABELS[name] || name.replaceAll("_", " "), value, maximum, "var(--yellow)")).join("")}</div>` : `<div class="notice"><span>Sem eventos sincronizados.</span></div>`}</article>`;
   }
 
   /* Versões -------------------------------------------------------------- */
@@ -4577,7 +5005,7 @@
   }
 
   function retryResource(resource) {
-    const loaders = { growth: loadGrowth, sales: loadSales, adoption: loadAdoption, referrals: loadReferrals, devices: loadDevices, diagnostics: loadDiagnostics, statistics: loadStatistics, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, vitals: loadVitals, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
+    const loaders = { growth: loadGrowth, sales: loadSales, adoption: loadAdoption, referrals: loadReferrals, devices: loadDevices, diagnostics: loadDiagnostics, map: loadMap, winback: loadWinback, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, vitals: loadVitals, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
     loaders[resource]?.();
   }
 
@@ -4592,6 +5020,14 @@
     if (!target) return;
     if (target.dataset.period) return setPeriod(Number(target.dataset.period));
     if (target.dataset.growthStage) { state.growthStage = target.dataset.growthStage; return renderCurrentPage(); }
+    if (target.dataset.useState) { state.useState = target.dataset.useState; return renderCurrentPage(); }
+    if (target.dataset.featureMode) { state.featureMode = target.dataset.featureMode; return renderCurrentPage(); }
+    if (target.dataset.winbackToggle) return toggleWinback(target.dataset.winbackToggle === "on");
+    if (target.dataset.talkToggle) {
+      const id = target.dataset.talkToggle;
+      if (state.talkOpen.has(id)) state.talkOpen.delete(id); else state.talkOpen.add(id);
+      return renderCurrentPage();
+    }
     if (target.dataset.openUserId) return openUserById(target.dataset.openUserId);
     if (target.dataset.cancelReferral) return cancelReferral(target.dataset.cancelReferral);
     if (target.dataset.refTab) { state.referralTab = target.dataset.refTab; return renderCurrentPage(); }
@@ -4784,6 +5220,8 @@
       return;
     }
     if (target.dataset.refreshUser) return refreshUser(findAccount(target.dataset.refreshUser));
+    if (target.dataset.noteAdd) return addUserNote(findAccount(target.dataset.noteAdd));
+    if (target.dataset.noteDelete) return deleteUserNote(findAccount(target.dataset.account), target.dataset.noteDelete);
     if (target.dataset.copy != null) return copyText(target.dataset.copy, "Identificador copiado");
     if (target.dataset.licenseAction) return handleLicenseAction(findAccount(target.dataset.account), target.dataset.licenseAction);
     if (target.dataset.accountAction === "clear_phone") return clearUserPhone(findAccount(target.dataset.account));
@@ -4806,7 +5244,16 @@
     }
   });
 
-  els.detailContent.addEventListener("input", (event) => onNewsInput(event.target));
+  els.detailContent.addEventListener("input", (event) => {
+    /* O detalhe é redesenhado quando um dado termina de carregar: o rascunho
+       da observação fica guardado para não se perder nesse meio-tempo. */
+    if (event.target.id === "user-note-text") {
+      const account = findAccount(state.detail?.key);
+      if (account) detailStore(account).noteDraft = event.target.value;
+      return;
+    }
+    onNewsInput(event.target);
+  });
 
   els.detailContent.addEventListener("change", (event) => {
     if (event.target.dataset.newsFile) {
