@@ -3675,13 +3675,15 @@
 
   /* Novidades -------------------------------------------------------------
      A seção Novidades da tela inicial do app. Cada linha de `app_news` é um
-     card na Home (imagem paisagem 4:3) que abre uma janela feita só da imagem
-     do guia (retrato 2:3). O app lê pela RPC get_app_news e guarda a última
-     lista, então o que se salva aqui chega na próxima abertura — em até 30
-     minutos — sem build novo. */
+     card na Home (imagem paisagem 4:3) que abre uma janela com o vídeo do
+     guia (MP4 retrato 9:16) ou, sem vídeo, só a imagem do guia (retrato 2:3).
+     O app lê pela RPC get_app_news e guarda a última lista, então o que se
+     salva aqui chega na próxima abertura — em até 30 minutos — sem build novo. */
   const NEWS_BUCKET = "news-media";
   const NEWS_MAX_BYTES = 2 * 1024 * 1024;
   const NEWS_TYPES = ["image/webp", "image/png", "image/jpeg"];
+  /* Mesmo teto do bucket e do download do app (VideosDasNovidades). */
+  const NEWS_VIDEO_MAX_BYTES = 12 * 1024 * 1024;
   const NEWS_ACCENTS = [["verde", "Verde"], ["vermelho", "Vermelho"], ["azul", "Azul"], ["amarelo", "Amarelo"], ["roxo", "Roxo"]];
   const NEWS_ICONS = [
     ["anuncio", "Megafone"], ["grupo", "Grupo"], ["video", "Câmera de vídeo"], ["captura", "Captura de tela"],
@@ -3692,7 +3694,7 @@
      NovidadesCatalogo.IMAGENS_EMBUTIDAS: um nome fora dela o app ignora. As
      cópias em ./assets servem só para a prévia deste painel. */
   const NEWS_BUILTIN = {
-    card: [["novidade_indique", "Indique e ganhe"], ["novidade_whatsapp", "Grupo do WhatsApp"], ["novidade_1", "Gravação Secreta"], ["novidade_2", "Captura de Tela"], ["novidade_4", "QR Pix"]],
+    card: [["novidade_indique", "Indique e ganhe"], ["novidade_veiculo", "Configure seu veículo"], ["novidade_whatsapp", "Grupo do WhatsApp"], ["novidade_1", "Gravação Secreta"], ["novidade_2", "Captura de Tela"], ["novidade_4", "QR Pix"]],
     guide: [["guia_novidade_indique", "Guia do Indique e ganhe"], ["guia_novidade_whatsapp", "Guia do grupo do WhatsApp"], ["guia_novidade_gravacao", "Guia da Gravação Secreta"], ["guia_novidade_captura", "Guia da Captura de Tela"], ["guia_novidade_pix", "Guia do QR Pix"]]
   };
   const NEWS_SLOTS = {
@@ -3701,7 +3703,7 @@
   };
   const NEWS_BLANK = {
     id: "", active: true, min_app_version: 0, card_title: "", card_summary: "", card_image: "", accent: "verde",
-    icon: "anuncio", eyebrow: "Novidade", title: "", subtitle: "", guide_image: "", guide_description: "", body: "",
+    icon: "anuncio", eyebrow: "Novidade", title: "", subtitle: "", guide_image: "", guide_video: "", guide_description: "", body: "",
     button_label: "", button_url: ""
   };
 
@@ -3749,12 +3751,13 @@
     if (!state.news && state.loading.news) return header + loadingState("Carregando as novidades…");
     if (state.errors.news && !state.news) return header + errorState(state.errors.news, "news");
     const items = state.news || [];
-    const guide = `<div class="notice notice--info">${icon("sparkles")}<span>O <strong>card</strong> é uma imagem paisagem 4:3 (ideal 1448 × 1086) e a <strong>janela</strong> é só a imagem do guia, retrato 2:3 (ideal 1024 × 1536), com um X para fechar. O botão embaixo da imagem só aparece quando a novidade tem link. Até 12 novidades ativas aparecem, na ordem abaixo. Builds anteriores a este recurso continuam com a lista que já levam.</span></div>`;
+    const guide = `<div class="notice notice--info">${icon("sparkles")}<span>O <strong>card</strong> é uma imagem paisagem 4:3 (ideal 1448 × 1086) e a <strong>janela</strong> toca o vídeo do guia (MP4 retrato 9:16, ideal 720 × 1280) ou, sem vídeo, mostra só a imagem do guia, retrato 2:3 (ideal 1024 × 1536), com um X para fechar. O app baixa o vídeo quando a janela abre e, sem rede, mostra a imagem; versões do app anteriores ao vídeo também mostram a imagem. O botão embaixo só aparece quando a novidade tem link. Até 12 novidades ativas aparecem, na ordem abaixo. Builds anteriores a este recurso continuam com a lista que já levam.</span></div>`;
     if (!items.length) return header + guide + emptyState("Nenhuma novidade cadastrada", "Com a lista vazia, a seção Novidades não aparece no app.", "sparkles", newButton);
     const active = items.filter((item) => item.active).length;
     const rows = items.map((item, index) => {
       const tags = [
         pill(item.active ? "Ativa" : "Desligada", item.active ? "green" : "neutral"),
+        item.guide_video ? `<span class="tag">Com vídeo</span>` : "",
         item.button_url ? `<span class="tag">Com link</span>` : "",
         asNumber(item.min_app_version) > 0 ? `<span class="tag tag--warning">A partir do build ${esc(item.min_app_version)}</span>` : ""
       ].join("");
@@ -3843,6 +3846,30 @@
     </div>`;
   }
 
+  function newsVideoPicker() {
+    const detail = state.detail;
+    const value = detail.item.guide_video || "";
+    const url = safeHttpUrl(value);
+    const uploading = detail.uploading.video;
+    const preview = uploading
+      ? `<span class="news-thumb news-thumb--video news-thumb--empty">${icon("loader", "icon spin")}<small>Enviando…</small></span>`
+      : url
+        ? `<video class="news-thumb news-thumb--video" src="${esc(url)}" controls preload="metadata" playsinline aria-label="Vídeo do guia"></video>`
+        : `<span class="news-thumb news-thumb--video news-thumb--empty">${icon("image")}<small>Sem vídeo: a janela mostra a imagem</small></span>`;
+    return `<div class="news-picker news-picker--video">
+      ${preview}
+      <div class="news-picker-copy">
+        <strong>Vídeo da janela</strong>
+        <small>${value ? "Vídeo enviado" : "Sem vídeo"} · MP4 retrato 9:16, ideal 720 × 1280 px, até ${esc(bytes(NEWS_VIDEO_MAX_BYTES))}. Toca no lugar da imagem; a imagem fica para quando o vídeo não baixa.</small>
+        <div class="detail-actions">
+          <button class="button button--secondary button--compact" data-news-video-upload${uploading ? " disabled" : ""}>${icon("upload")} Enviar vídeo</button>
+          ${value ? `<button class="button button--quiet button--compact" data-news-video-clear>Remover</button>` : ""}
+        </div>
+        <input type="file" id="news-file-video" data-news-video-file accept="video/mp4" hidden>
+      </div>
+    </div>`;
+  }
+
   function renderNewsEditor() {
     const detail = state.detail;
     if (detail?.type !== "news") return;
@@ -3862,8 +3889,9 @@
       </section>
       <section class="detail-section">
         <h3>Janela que o card abre</h3>
+        ${newsVideoPicker()}
         ${newsImagePicker("guide")}
-        ${newsField("guide_description", "Descrição da imagem", item.guide_description, { textarea: true, maxlength: 1200, hint: "O passo a passo da imagem em texto. O TalkBack lê isto, e a janela mostra este texto se a imagem não carregar." })}
+        ${newsField("guide_description", "Descrição do guia", item.guide_description, { textarea: true, maxlength: 1200, hint: "O passo a passo do vídeo e da imagem em texto. O TalkBack lê isto, e a janela mostra este texto quando não há vídeo nem imagem para mostrar." })}
         ${newsField("button_url", "Link do botão", item.button_url, { maxlength: 2048, placeholder: "https://…", hint: "Opcional: um link https, ou app:indicacoes para abrir a janela de Indicações do app (258+). Com link aparece um botão embaixo da imagem; sem link, a janela é só a imagem e o X." })}
         ${newsField("button_label", "Texto do botão", item.button_label, { maxlength: 40, placeholder: item.button_url ? "Abrir" : "Entendi" })}
       </section>
@@ -3981,6 +4009,46 @@
     }
   }
 
+  /* Vídeo do guia: mesmo caminho das imagens, na pasta videos/ do bucket e
+     com nome único por envio (o app guarda o vídeo pela URL). */
+  async function uploadNewsVideo(file) {
+    const detail = state.detail;
+    if (detail?.type !== "news") return;
+    if (file.type !== "video/mp4") return toast("Formato não aceito", "error", "Use um vídeo MP4.");
+    if (file.size > NEWS_VIDEO_MAX_BYTES) return toast("Vídeo grande demais", "error", `O limite é ${bytes(NEWS_VIDEO_MAX_BYTES)}. Exporte em 720 × 1280.`);
+    detail.uploading.video = true; renderNewsEditor();
+    try {
+      if (!state.session?.accessToken) throw new Error("Sessão administrativa ausente.");
+      if (state.session.expiresAt && state.session.expiresAt - Date.now() < 30_000 && state.session.refreshToken) {
+        await refreshSession();
+      }
+      const limpo = file.name.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9._-]/g, "-").slice(-60);
+      const caminho = `videos/video-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${limpo}`;
+      const response = await fetch(`${SUPABASE_URL}/storage/v1/object/${NEWS_BUCKET}/${caminho.split("/").map(encodeURIComponent).join("/")}`, {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${state.session.accessToken}`,
+          "Content-Type": file.type,
+          "Cache-Control": "31536000",
+          "x-upsert": "false"
+        },
+        body: file
+      });
+      if (!response.ok) {
+        const detalhe = await response.json().catch(() => ({}));
+        throw new Error(detalhe.message || detalhe.error || `O servidor recusou o vídeo (${response.status}).`);
+      }
+      detail.item.guide_video = `${SUPABASE_URL}/storage/v1/object/public/${NEWS_BUCKET}/${caminho.split("/").map(encodeURIComponent).join("/")}`;
+      toast("Vídeo enviado", "success", "Salve a novidade para publicar.");
+    } catch (error) {
+      toast("Não foi possível enviar o vídeo", "error", error.message);
+    } finally {
+      detail.uploading.video = false;
+      if (state.detail === detail) renderNewsEditor();
+    }
+  }
+
   /* Ações da lista ------------------------------------------------------- */
   async function toggleNews(id) {
     const item = (state.news || []).find((row) => row.id === id);
@@ -4031,10 +4099,10 @@
       /* Melhor esforço: apaga do bucket as imagens que nenhuma outra novidade
          usa. Se falhar, o arquivo fica órfão, mas ninguém mais o baixa. */
       const others = (state.news || []).filter((row) => row.id !== id);
-      [item.card_image, item.guide_image].forEach((url) => {
+      [item.card_image, item.guide_image, item.guide_video].forEach((url) => {
         const path = newsMediaPath(url);
-        if (!path || others.some((row) => row.card_image === url || row.guide_image === url)) return;
-        fetch(`${SUPABASE_URL}/storage/v1/object/${NEWS_BUCKET}/${encodeURIComponent(path)}`, {
+        if (!path || others.some((row) => row.card_image === url || row.guide_image === url || row.guide_video === url)) return;
+        fetch(`${SUPABASE_URL}/storage/v1/object/${NEWS_BUCKET}/${path.split("/").map(encodeURIComponent).join("/")}`, {
           method: "DELETE",
           headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${state.session?.accessToken}` }
         }).catch(() => {});
@@ -5210,6 +5278,11 @@
     if (target.hasAttribute("data-close-detail")) return els.detail.close();
     if (target.hasAttribute("data-news-save")) return saveNews();
     if (target.dataset.newsUpload) return $(`news-file-${target.dataset.newsUpload}`)?.click();
+    if (target.hasAttribute("data-news-video-upload")) return $("news-file-video")?.click();
+    if (target.hasAttribute("data-news-video-clear") && state.detail?.type === "news") {
+      state.detail.item.guide_video = "";
+      return renderNewsEditor();
+    }
     if (target.dataset.newsClear && state.detail?.type === "news") {
       state.detail.item[NEWS_SLOTS[target.dataset.newsClear].field] = "";
       return renderNewsEditor();
@@ -5263,6 +5336,12 @@
       const kind = event.target.dataset.newsFile;
       event.target.value = "";
       if (file) uploadNewsImage(kind, file);
+      return;
+    }
+    if (event.target.hasAttribute("data-news-video-file")) {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (file) uploadNewsVideo(file);
       return;
     }
     if (event.target.dataset.newsBuiltin && state.detail?.type === "news") {
