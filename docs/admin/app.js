@@ -1525,14 +1525,15 @@
   ];
   const FEATURE_BY_EVENT = new Map(FEATURES.flatMap((feature) => (feature.events || []).map((key) => [key, feature.label])));
 
-  /* Os modelos da Meta, como em supabase/functions/_shared/winback.ts. Os
-     próprios de "Acesso venceu" e "Nada lido" só saem depois de aprovados;
-     até lá esses casos abrem com o modelo genérico. */
+  /* Os modelos da Meta, como em supabase/functions/_shared/winback.ts. Sem
+     botões: a pessoa responde do jeito dela. Os próprios de "Acesso venceu" e
+     "Nada lido" só saem depois de aprovados; até lá esses casos abrem com o
+     modelo genérico. */
   const WINBACK_TEMPLATES = [
-    ["Novo, não ativou · Ativação incompleta · Nunca usou", "Oi, (nome)! Aqui é a Gain IA, assistente do Gain Calculator. Vi que você criou sua conta, mas ainda não começou a usar a leitura das corridas. Travou em algum passo ou ficou alguma dúvida? Me conta que eu te ajudo agora.", ["Não consegui configurar", "Fiquei com receio", "Ainda vou testar"]],
-    ["Nada lido", "Oi, (nome)! Aqui é a Gain IA, assistente do Gain Calculator. Vi que você ligou a leitura das corridas, mas o Gain ainda não mostrou nenhuma solicitação para você. Alguma coisa não funcionou no seu celular? Me conta que eu te ajudo.", ["Não apareceu nada", "Ainda não rodei", "Desisti de usar"]],
-    ["Acesso venceu", "Oi, (nome)! Aqui é a Gain IA, assistente do Gain Calculator. Seu acesso ao Gain terminou e você não seguiu usando. Queria entender o que pesou nessa decisão, para a gente melhorar. Pode me contar?", ["Achei caro", "Não vi vantagem", "Não funcionou bem"]],
-    ["Parou de usar", "Oi, (nome)! Aqui é a Gain IA, assistente do Gain Calculator. Notei que você não usou mais o app e queria entender o que aconteceu, para a gente melhorar. O que mais pesou para você parar?", ["Não funcionou bem", "Não vi vantagem", "Achei caro"]]
+    ["Novo, não ativou · Ativação incompleta · Nunca usou", "Oi, (nome)! Somos da equipe de suporte do Gain Calculator. Percebemos que você baixou o nosso aplicativo, mas não terminou a configuração. Gostaríamos de saber sua opinião: teve algo que te incomodou? Ou teve alguma dificuldade na configuração?"],
+    ["Nada lido", "Oi, (nome)! Somos da equipe de suporte do Gain Calculator. Percebemos que você ativou a leitura das corridas, mas o aplicativo ainda não mostrou nenhuma solicitação para você. Gostaríamos de saber: aconteceu algum problema no seu celular? Ou ainda não deu tempo de testar?"],
+    ["Acesso venceu", "Oi, (nome)! Somos da equipe de suporte do Gain Calculator. Percebemos que o seu acesso ao aplicativo terminou e você não continuou usando. Gostaríamos muito de saber sua opinião: teve algo que te incomodou? Ou algo que poderíamos ter feito melhor?"],
+    ["Parou de usar", "Oi, (nome)! Somos da equipe de suporte do Gain Calculator. Percebemos que você deixou de usar o nosso aplicativo e gostaríamos muito de saber sua opinião. Teve algo que te incomodou? Ou algo que não funcionou como você esperava?"]
   ];
 
   /* 28 quadradinhos, um por dia: mais verde, mais horas de leitura. Amarelo é
@@ -1632,7 +1633,7 @@
       ? `<p class="wb-sub">Próximos a receber</p><div class="wb-queue">${next.slice(0, 10).map((row) => `<button class="wb-next" type="button" data-open-user-id="${esc(row.user_id)}" title="Abrir a conta"><span class="avatar">${esc(initials(row.name, row.email))}</span><span><strong>${esc(shortName(row))}</strong><small>${esc(caseLabel(row.kind))} · ${row.idle_days != null ? `parado há ${count(row.idle_days)} dias` : `conta há ${count(row.signup_days)} dias`}</small></span></button>`).join("")}</div>`
       : `<p class="wb-sub">Ninguém na fila agora.</p>`;
     const list = talks.length ? `<p class="wb-sub">Conversas</p>${talks.map(renderTalk).join("")}` : "";
-    const templates = `<details class="wb-details"><summary>Ver a mensagem que abre a conversa</summary>${WINBACK_TEMPLATES.map(([name, text, buttons]) => `<div class="wb-template"><span>${esc(name)}</span><p>${esc(text)}</p><div class="wb-buttons">${buttons.map((label) => `<i>${esc(label)}</i>`).join("")}</div></div>`).join("")}<p class="chart-caption">Cada caso tem a própria abordagem da Gain IA, e as conversas ficam na página Conversas. Só para telefone verificado, uma abordagem por pessoa. Depois da resposta a Gain IA faz no máximo três mensagens curtas, encerra e grava o resumo nas observações da conta. Quem responde SAIR não recebe mais. Cada modelo só sai depois de aprovado pela Meta: a situação aparece na página WhatsApp.</p></details>`;
+    const templates = `<details class="wb-details"><summary>Ver a mensagem que abre a conversa</summary>${WINBACK_TEMPLATES.map(([name, text]) => `<div class="wb-template"><span>${esc(name)}</span><p>${esc(text)}</p></div>`).join("")}<p class="chart-caption">Cada caso tem a própria abordagem da Gain IA, e as conversas ficam na página Conversas. Só para telefone verificado, uma abordagem por pessoa. Depois da resposta a Gain IA faz no máximo três mensagens curtas, encerra e grava o resumo nas observações da conta. Quem responde SAIR não recebe mais. Cada modelo só sai depois de aprovado pela Meta: a situação aparece na página WhatsApp.</p></details>`;
     return panel(title, copy, status + facts + queue + list + templates, toggle, "wb-panel");
   }
 
@@ -3169,8 +3170,10 @@
     const templates = [
       ["codigo_de_verificacao", "Código de verificação", "autenticação"],
       ["aviso_android_vitals", "Aviso de Android vitals", "utilidade"],
-      ["retorno_parou_de_usar", "Conversa de retorno · parou de usar", "marketing"],
-      ["retorno_configuracao", "Conversa de retorno · não começou", "marketing"]
+      ["suporte_configuracao", "Conversa de retorno · não começou", "marketing"],
+      ["suporte_nada_lido", "Conversa de retorno · nada lido", "marketing"],
+      ["suporte_acesso_venceu", "Conversa de retorno · acesso venceu", "marketing"],
+      ["suporte_parou_de_usar", "Conversa de retorno · parou de usar", "marketing"]
     ];
     const templateRows = cloud.templates
       ? `<div class="activity-list">${templates.map(([key, label, use]) => { const status = templateState(cloud.templates[key]); return `<div class="activity-item"><span class="activity-icon">${icon("message")}</span><span class="activity-copy"><strong>${esc(label)}</strong><small>${esc(key)} · ${esc(use)}</small></span>${pill(status.label, status.tone)}</div>`; }).join("")}</div>`
