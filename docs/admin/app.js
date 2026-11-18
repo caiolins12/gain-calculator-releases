@@ -15,6 +15,7 @@
     users: { eyebrow: "Clientes", title: "Usuários", description: "Contas, licenças, dispositivos e uso do monitoramento." },
     referrals: { eyebrow: "Clientes", title: "Indicações", description: "Indique e ganhe: quem indicou, quantos entraram e o que cada lado ganhou." },
     broadcast: { eyebrow: "Clientes", title: "Comunicados", description: "Envio controlado de mensagens para números verificados ou uma lista manual." },
+    conversations: { eyebrow: "Clientes", title: "Conversas", description: "Conversas de retorno pelo WhatsApp: o que a Gain IA perguntou e o que cada pessoa respondeu." },
     assistant: { eyebrow: "Produto", title: "Gain IA", description: "Modelo, gasto com a OpenAI, experiência no app e uso por conta." },
     news: { eyebrow: "Produto", title: "Novidades", description: "Cards e janelas da seção Novidades da tela inicial do app." },
     services: { eyebrow: "Sistema", title: "Status dos serviços", description: "Disponibilidade e latência das dependências críticas do app." },
@@ -61,6 +62,11 @@
     growthStage: "all",
     map: null,
     winback: null,
+    inbox: null,
+    inboxSel: null,
+    inboxSearch: "",
+    inboxCase: "all",
+    inboxView: "all",
     useState: "all",
     featureMode: "ever",
     talkOpen: new Set(),
@@ -728,6 +734,7 @@
     if (page === "growth") { ensureMetrics(["growth"]); ensureMap(); }
     if (page === "sales") ensureMetrics(["sales"]);
     if (page === "adoption") { ensureMetrics(["adoption"]); ensureMap(); ensureWinback(); }
+    if (page === "conversations" && !state.inbox && !state.loading.inbox) loadInbox();
     if (page === "users" && !state.versions && !state.loading.versions) loadVersions();
     if (page === "traces" && !state.traces && !state.loading.traces) loadTraces();
     if (page === "vitals" && !state.vitals && !state.loading.vitals) loadVitals();
@@ -1219,7 +1226,18 @@
     sem_corrida: ["Nenhuma corrida até o fim", "Leu solicitações, mas nenhuma corrida foi acompanhada até o fim."],
     sem_pista: ["Usou e sumiu", "Leu e acompanhou corridas em mais de um dia, e parou sem sinal nos dados. Só perguntando."]
   };
-  const TALK_REASONS = { tecnico: "Não funcionou bem", nao_viu_valor: "Não viu vantagem", preco: "Achou caro", parou_de_rodar: "Parou de rodar", dificuldade_configurar: "Não conseguiu configurar", receio_privacidade: "Receio das permissões", falta_de_tempo: "Ainda não testou", concorrente: "Usa outro app", outro: "Outro motivo", sem_resposta_clara: "Não deixou claro" };
+  const TALK_REASONS = { tecnico: "Não funcionou bem", nao_viu_valor: "Não viu vantagem", preco: "Achou caro", parou_de_rodar: "Parou de rodar", dificuldade_configurar: "Não conseguiu configurar", receio_privacidade: "Receio das permissões", falta_de_tempo: "Ainda não testou", concorrente: "Usa outro app", so_conhecendo: "Só quis conhecer", nao_entendeu: "Não entendeu o app", outro: "Outro motivo", sem_resposta_clara: "Não deixou claro" };
+  /* Caso de cada conversa de retorno (winback_candidates, migração
+     20261117120000): onde a pessoa parou decide a abordagem da Gain IA. */
+  const TALK_CASES = {
+    novo_sem_ativar: ["Novo, não ativou", "Conta nova que parou antes de ligar a leitura"],
+    ativacao_incompleta: ["Ativação incompleta", "Começou a ligar a leitura e não terminou"],
+    nunca_usou: ["Nunca usou", "Conta antiga que nunca ligou a leitura"],
+    nada_lido: ["Nada lido", "Ligou a leitura e nenhuma solicitação foi lida"],
+    acesso_venceu: ["Acesso venceu", "Parou quando o teste ou a assinatura acabou"],
+    parou: ["Parou de usar", "Usou e parou com o acesso valendo"]
+  };
+  function caseLabel(kind) { return (TALK_CASES[kind] || [kind || "—"])[0]; }
   const TALK_STATUS = { queued: ["na fila", "neutral"], sent: ["enviada", "blue"], delivered: ["entregue", "blue"], read: ["lida, sem resposta", "purple"], replied: ["em conversa", "yellow"], closed: ["concluída", "green"], expired: ["sem resposta", "neutral"], failed: ["não entregue", "red"], opted_out: ["pediu para sair", "red"] };
 
   function mapNow() { return asNumber(state.map?.generated_at_ms) || state.serverNow || Date.now(); }
@@ -1507,9 +1525,14 @@
   ];
   const FEATURE_BY_EVENT = new Map(FEATURES.flatMap((feature) => (feature.events || []).map((key) => [key, feature.label])));
 
+  /* Os modelos da Meta, como em supabase/functions/_shared/winback.ts. Os
+     próprios de "Acesso venceu" e "Nada lido" só saem depois de aprovados;
+     até lá esses casos abrem com o modelo genérico. */
   const WINBACK_TEMPLATES = [
-    ["Para quem parou de usar", "Oi, (nome)! Aqui é a Gain IA, assistente do Gain Calculator. Notei que você não usou mais o app e queria entender o que aconteceu, para a gente melhorar. O que mais pesou para você parar?", ["Não funcionou bem", "Não vi vantagem", "Achei caro"]],
-    ["Para quem criou a conta e não começou", "Oi, (nome)! Aqui é a Gain IA, assistente do Gain Calculator. Vi que você criou sua conta, mas ainda não começou a usar a leitura das corridas. Travou em algum passo ou ficou alguma dúvida? Me conta que eu te ajudo agora.", ["Não consegui configurar", "Fiquei com receio", "Ainda vou testar"]]
+    ["Novo, não ativou · Ativação incompleta · Nunca usou", "Oi, (nome)! Aqui é a Gain IA, assistente do Gain Calculator. Vi que você criou sua conta, mas ainda não começou a usar a leitura das corridas. Travou em algum passo ou ficou alguma dúvida? Me conta que eu te ajudo agora.", ["Não consegui configurar", "Fiquei com receio", "Ainda vou testar"]],
+    ["Nada lido", "Oi, (nome)! Aqui é a Gain IA, assistente do Gain Calculator. Vi que você ligou a leitura das corridas, mas o Gain ainda não mostrou nenhuma solicitação para você. Alguma coisa não funcionou no seu celular? Me conta que eu te ajudo.", ["Não apareceu nada", "Ainda não rodei", "Desisti de usar"]],
+    ["Acesso venceu", "Oi, (nome)! Aqui é a Gain IA, assistente do Gain Calculator. Seu acesso ao Gain terminou e você não seguiu usando. Queria entender o que pesou nessa decisão, para a gente melhorar. Pode me contar?", ["Achei caro", "Não vi vantagem", "Não funcionou bem"]],
+    ["Parou de usar", "Oi, (nome)! Aqui é a Gain IA, assistente do Gain Calculator. Notei que você não usou mais o app e queria entender o que aconteceu, para a gente melhorar. O que mais pesou para você parar?", ["Não funcionou bem", "Não vi vantagem", "Achei caro"]]
   ];
 
   /* 28 quadradinhos, um por dia: mais verde, mais horas de leitura. Amarelo é
@@ -1606,17 +1629,17 @@
     const status = `<div class="wb-status wb-status--${on ? "on" : "off"}"><i></i><span>${on ? `Ligado: até ${count(config.daily_limit)} primeiras mensagens por dia, de segunda a sábado, das 10h às 19h.` : "Desligado: nenhuma mensagem sai sozinha. Respostas de conversas já abertas continuam sendo atendidas."}</span></div>`;
     const facts = `<div class="wb-facts"><div><strong>${count(totals.sent)}</strong><span>enviadas</span></div><div><strong>${count(totals.replied)}</strong><span>responderam</span></div><div><strong>${count(totals.closed)}</strong><span>concluídas</span></div><div><strong>${count(next.length)}</strong><span>na fila</span></div></div>`;
     const queue = next.length
-      ? `<p class="wb-sub">Próximos a receber</p><div class="wb-queue">${next.slice(0, 10).map((row) => `<button class="wb-next" type="button" data-open-user-id="${esc(row.user_id)}" title="Abrir a conta"><span class="avatar">${esc(initials(row.name, row.email))}</span><span><strong>${esc(shortName(row))}</strong><small>${row.kind === "parou" ? `parou há ${count(row.idle_days)} dias` : `conta há ${count(row.signup_days)} dias, sem usar`}</small></span></button>`).join("")}</div>`
+      ? `<p class="wb-sub">Próximos a receber</p><div class="wb-queue">${next.slice(0, 10).map((row) => `<button class="wb-next" type="button" data-open-user-id="${esc(row.user_id)}" title="Abrir a conta"><span class="avatar">${esc(initials(row.name, row.email))}</span><span><strong>${esc(shortName(row))}</strong><small>${esc(caseLabel(row.kind))} · ${row.idle_days != null ? `parado há ${count(row.idle_days)} dias` : `conta há ${count(row.signup_days)} dias`}</small></span></button>`).join("")}</div>`
       : `<p class="wb-sub">Ninguém na fila agora.</p>`;
     const list = talks.length ? `<p class="wb-sub">Conversas</p>${talks.map(renderTalk).join("")}` : "";
-    const templates = `<details class="wb-details"><summary>Ver a mensagem que abre a conversa</summary>${WINBACK_TEMPLATES.map(([name, text, buttons]) => `<div class="wb-template"><span>${esc(name)}</span><p>${esc(text)}</p><div class="wb-buttons">${buttons.map((label) => `<i>${esc(label)}</i>`).join("")}</div></div>`).join("")}<p class="chart-caption">Só para telefone verificado, uma abordagem por pessoa. Depois da resposta a Gain IA faz no máximo três mensagens curtas, encerra e grava o resumo nas observações da conta. Quem responde SAIR não recebe mais. Cada modelo só sai depois de aprovado pela Meta: a situação aparece na página WhatsApp.</p></details>`;
+    const templates = `<details class="wb-details"><summary>Ver a mensagem que abre a conversa</summary>${WINBACK_TEMPLATES.map(([name, text, buttons]) => `<div class="wb-template"><span>${esc(name)}</span><p>${esc(text)}</p><div class="wb-buttons">${buttons.map((label) => `<i>${esc(label)}</i>`).join("")}</div></div>`).join("")}<p class="chart-caption">Cada caso tem a própria abordagem da Gain IA, e as conversas ficam na página Conversas. Só para telefone verificado, uma abordagem por pessoa. Depois da resposta a Gain IA faz no máximo três mensagens curtas, encerra e grava o resumo nas observações da conta. Quem responde SAIR não recebe mais. Cada modelo só sai depois de aprovado pela Meta: a situação aparece na página WhatsApp.</p></details>`;
     return panel(title, copy, status + facts + queue + list + templates, toggle, "wb-panel");
   }
 
   async function toggleWinback(turnOn) {
     if (turnOn) {
       const waiting = (state.winback?.next || []).length, limit = asNumber(state.winback?.config?.daily_limit, 6);
-      if (!await askConfirm({ title: "Ligar as conversas de retorno?", message: `O WhatsApp oficial do Gain passa a enviar sozinho a primeira mensagem para quem parou de usar ou criou a conta e não começou, só para telefones verificados: até ${limit} por dia, de segunda a sábado, entre 10h e 19h. Há ${waiting} ${waiting === 1 ? "pessoa" : "pessoas"} na fila agora. Cada pessoa recebe uma abordagem só.`, label: "Ligar envio" })) return;
+      if (!await askConfirm({ title: "Ligar as conversas de retorno?", message: `O WhatsApp oficial do Gain passa a enviar sozinho a primeira mensagem para quem parou de usar ou não começou (cada caso com a própria abordagem), só para telefones verificados: até ${limit} por dia, de segunda a sábado, entre 10h e 19h. Há ${waiting} ${waiting === 1 ? "pessoa" : "pessoas"} na fila agora. Cada pessoa recebe uma abordagem só.`, label: "Ligar envio" })) return;
     }
     try {
       const result = await rpc("admin_winback_set", { p_enabled: turnOn, p_daily_limit: null });
@@ -1626,6 +1649,210 @@
     } catch (error) {
       toast("Não foi possível alterar o envio", "error", error?.message || "");
     }
+  }
+
+  /* Conversas -------------------------------------------------------------
+     As conversas de retorno lidas como no WhatsApp Web: a lista à esquerda,
+     a conversa à direita. Só leitura — quem responde é a Gain IA. O que a
+     tela sabe de entrega: a 1ª mensagem tem o aviso da Meta (entregue, lida);
+     as respostas da IA só têm o aceite do servidor, e a tela não finge mais. */
+  function loadInbox(options = {}) {
+    return loadResource("inbox", () => rpc("admin_winback_inbox", {}), (result) => {
+      if (result.status !== "ok") throw new Error("Sem permissão para consultar as conversas.");
+      state.inbox = result;
+    }, options);
+  }
+
+  const INBOX_VIEWS = [
+    ["all", "Todas"],
+    ["replied", "Responderam"],
+    ["human", "Pedem contato"]
+  ];
+
+  function inboxMessages(talk) { return Array.isArray(talk.messages) ? talk.messages : []; }
+  function inboxLast(talk) { const list = inboxMessages(talk); return list[list.length - 1] || null; }
+  function inboxAnswered(talk) { return inboxMessages(talk).some((m) => m.r === "in"); }
+
+  /* Hora como no mensageiro: hoje mostra o relógio; ontem, "Ontem"; nesta
+     semana, o dia; antes disso, a data. */
+  function chatStamp(ms) {
+    if (!asNumber(ms)) return "";
+    const date = new Date(asNumber(ms));
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const diff = Math.floor((today - new Date(date).setHours(0, 0, 0, 0)) / DAY_MS);
+    if (diff <= 0) return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    if (diff === 1) return "Ontem";
+    if (diff < 7) return date.toLocaleDateString("pt-BR", { weekday: "long" }).replace(/-feira$/, "");
+    return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  }
+  function chatDay(ms) {
+    const date = new Date(asNumber(ms));
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const diff = Math.floor((today - new Date(date).setHours(0, 0, 0, 0)) / DAY_MS);
+    if (diff <= 0) return "Hoje";
+    if (diff === 1) return "Ontem";
+    return date.toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: date.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+  }
+  function clock(ms) { return asNumber(ms) ? new Date(asNumber(ms)).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : ""; }
+
+  /* Tique da 1ª mensagem pelo aviso da Meta. */
+  function firstTick(talk) {
+    if (talk.status === "failed") return { name: "alert", tone: "is-failed", label: "Não entregue" };
+    if (["read", "replied", "closed", "opted_out"].includes(talk.status) || inboxAnswered(talk)) return { name: "check-double", tone: "is-sent", label: "Lida" };
+    if (talk.status === "delivered" || talk.status === "expired") return { name: "check-double", tone: "", label: "Entregue" };
+    if (talk.status === "sent") return { name: "check", tone: "", label: "Enviada" };
+    return { name: "clock", tone: "", label: "Na fila" };
+  }
+
+  function inboxFiltered() {
+    const talks = state.inbox?.conversations || [];
+    const query = state.inboxSearch.trim().toLocaleLowerCase("pt-BR");
+    const digits = onlyDigits(query);
+    return talks.filter((talk) => {
+      if (state.inboxCase !== "all" && talk.kind !== state.inboxCase) return false;
+      if (state.inboxView === "replied" && !inboxAnswered(talk)) return false;
+      if (state.inboxView === "human" && !talk.needs_human) return false;
+      if (!query) return true;
+      const hay = `${talk.name || ""} ${talk.email || ""}`.toLocaleLowerCase("pt-BR");
+      return hay.includes(query) || (digits.length >= 3 && onlyDigits(talk.phone).includes(digits));
+    });
+  }
+
+  /* O que a pessoa vê na lista: o texto sem os botões e o rodapé do modelo. */
+  function previewText(message) {
+    return String(message?.t || "").replace(/\n\n(\[[^\]]+\]\s?)+\n.*$/s, "").replace(/\s+/g, " ").trim();
+  }
+
+  function renderInboxList() {
+    const all = state.inbox?.conversations || [];
+    if (!all.length) return `<p class="chat-side-empty">As conversas aparecem aqui assim que a primeira mensagem sair.</p>`;
+    const talks = inboxFiltered();
+    if (!talks.length) return `<p class="chat-side-empty">Nenhuma conversa com este filtro.</p>`;
+    const selected = String(state.inboxSel ?? talks[0].id);
+    return talks.map((talk) => {
+      const last = inboxLast(talk);
+      const fromUs = last?.r !== "in";
+      const tick = fromUs ? firstTick(talk) : null;
+      const [statusLabel, tone] = TALK_STATUS[talk.status] || [talk.status, "neutral"];
+      const result = talk.reason ? TALK_REASONS[talk.reason] || talk.reason : statusLabel;
+      const preview = last ? `${fromUs ? "Gain IA: " : ""}${previewText(last)}` : (talk.error ? `Falha: ${talk.error}` : "Sem mensagens");
+      const waiting = last?.r === "in" && talk.status === "replied";
+      return `<button class="inbox-row${String(talk.id) === selected ? " is-active" : ""}" type="button" data-inbox-open="${esc(talk.id)}" aria-current="${String(talk.id) === selected}">
+        <span class="avatar">${esc(initials(talk.name, talk.email))}</span>
+        <span class="inbox-row-copy">
+          <span class="inbox-row-line"><strong>${esc(talk.name || talk.email || phoneLabel(talk.phone))}</strong><time class="${waiting ? "is-new" : ""}">${esc(chatStamp(talk.last_ms))}</time></span>
+          <span class="inbox-row-line inbox-row-preview">${tick && fromUs && inboxMessages(talk).length === 1 ? icon(tick.name, `icon ${tick.tone}`) : ""}<span>${esc(preview)}</span>${waiting ? '<i class="inbox-dot" aria-label="Respondeu por último"></i>' : ""}</span>
+          <span class="inbox-row-meta"><span>${esc(caseLabel(talk.kind))}</span><span class="inbox-tone inbox-tone--${tone}">${esc(result)}</span>${talk.needs_human ? `<span class="inbox-tone inbox-tone--yellow">pede contato</span>` : ""}</span>
+        </span>
+      </button>`;
+    }).join("");
+  }
+
+  /* Mensagem do modelo: corpo, rodapé e os botões de resposta rápida, como o
+     WhatsApp mostra (textoDoModelo em _shared/winback.ts). */
+  function splitTemplate(text) {
+    const match = String(text || "").match(/^([\s\S]*?)\n\n((?:\[[^\]]+\]\s?)+)\n(.*)$/);
+    if (!match) return { body: String(text || ""), buttons: [], footer: "" };
+    return { body: match[1], buttons: [...match[2].matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]), footer: match[3] };
+  }
+
+  function renderInboxMessages(talk) {
+    const messages = inboxMessages(talk);
+    let lastDay = "";
+    return messages.map((message, index) => {
+      const day = message.at ? chatDay(message.at) : "";
+      const separator = day && day !== lastDay ? `<div class="chat-day"><span>${esc(day)}</span></div>` : "";
+      if (day) lastDay = day;
+      const incoming = message.r === "in";
+      const isTemplate = index === 0 && !incoming;
+      const parts = isTemplate ? splitTemplate(message.t) : { body: String(message.t || ""), buttons: [], footer: "" };
+      const audio = incoming && /^\[áudio\]\s?/.test(parts.body);
+      const body = audio ? parts.body.replace(/^\[áudio\]\s?/, "") : parts.body;
+      const tick = !incoming ? (isTemplate ? firstTick(talk) : { name: "check", tone: "", label: "Aceita pelo servidor" }) : null;
+      const meta = `<span class="bubble-meta">${esc(clock(message.at))}${tick ? `<span title="${esc(tick.label)}" aria-label="${esc(tick.label)}">${icon(tick.name, `icon ${tick.tone}`)}</span>` : ""}</span>`;
+      const label = audio ? `<span class="chat-bubble-tag">${icon("mic")}Áudio transcrito</span>` : "";
+      const footer = parts.footer ? `<small class="chat-bubble-footer">${esc(parts.footer)}</small>` : "";
+      const late = message.late ? `<p class="chat-late">Chegou depois que a conversa foi encerrada</p>` : "";
+      const buttons = parts.buttons.length ? `<div class="chat-quick">${parts.buttons.map((b) => `<span>${esc(b)}</span>`).join("")}</div>` : "";
+      return `${separator}<div class="chat-line chat-line--${incoming ? "in" : "out"}"><div class="chat-stack"><div class="chat-bubble${incoming ? " chat-bubble--in" : ""}">${label}${esc(body)}${footer}${meta}</div>${buttons}${late}</div></div>`;
+    }).join("");
+  }
+
+  function renderInboxOutcome(talk) {
+    const rows = [];
+    if (talk.reason) rows.push(`<div><dt>Motivo</dt><dd>${esc(TALK_REASONS[talk.reason] || talk.reason)}</dd></div>`);
+    if (talk.would_return) rows.push(`<div><dt>Voltaria se</dt><dd>${esc(talk.would_return)}</dd></div>`);
+    if (talk.summary) rows.push(`<div class="inbox-outcome-wide"><dt>Resumo da Gain IA</dt><dd>${esc(talk.summary)}</dd></div>`);
+    const flags = [
+      talk.needs_human ? pill("Pede contato seu", "yellow") : "",
+      talk.status === "opted_out" ? pill("Pediu para sair", "red") : "",
+      talk.status === "expired" ? pill("Sem resposta em 7 dias", "neutral") : "",
+      talk.status === "failed" ? pill(`Não entregue${talk.error ? `: ${talk.error}` : ""}`, "red") : ""
+    ].filter(Boolean).join("");
+    if (!rows.length && !flags) return "";
+    return `<section class="inbox-outcome" aria-label="Resultado da conversa">${flags ? `<div class="inbox-outcome-flags">${flags}</div>` : ""}${rows.length ? `<dl>${rows.join("")}</dl>` : ""}</section>`;
+  }
+
+  function renderInboxChat(talk) {
+    const [statusLabel, tone] = TALK_STATUS[talk.status] || [talk.status, "neutral"];
+    const opened = talk.sent_ms || talk.created_ms;
+    const note = `<p class="chat-note">Conversa aberta ${esc(dateTime(opened))} · caso <strong>${esc(caseLabel(talk.kind))}</strong> (${esc((TALK_CASES[talk.kind] || [, ""])[1].toLowerCase())}) · modelo ${esc(talk.template || "—")}</p>`;
+    const messages = inboxMessages(talk).length ? renderInboxMessages(talk) : `<p class="chat-note">Nenhuma mensagem registrada${talk.error ? `: ${esc(talk.error)}` : ""}.</p>`;
+    return `<article class="chat-main inbox-main">
+      <header class="chat-top">
+        <button class="icon-button inbox-back" type="button" data-inbox-back aria-label="Voltar para a lista">${icon("chevron-right")}</button>
+        <span class="avatar">${esc(initials(talk.name, talk.email))}</span>
+        <span class="chat-top-copy"><strong>${esc(talk.name || talk.email || "Conta sem nome")}</strong><small>${esc(phoneLabel(talk.phone))} · ${esc(caseLabel(talk.kind))}</small></span>
+        ${pill(statusLabel, tone)}
+        <button class="button button--secondary button--compact" type="button" data-open-user-id="${esc(talk.user_id)}">Abrir conta</button>
+      </header>
+      ${renderInboxOutcome(talk)}
+      <div id="inbox-canvas" class="chat-canvas">${note}${messages}</div>
+      <footer class="inbox-foot">${icon("info")}<span>Só leitura: quem responde é a Gain IA, em até três mensagens. O resumo também fica nas observações da conta.</span></footer>
+    </article>`;
+  }
+
+  /* Sem conversa ainda: quem está na fila, por caso, para a página dizer o
+     que vai acontecer quando o envio estiver ligado. */
+  function renderInboxWaiting() {
+    const queue = state.inbox?.queue || [];
+    const on = !!state.inbox?.enabled;
+    const groups = Object.keys(TALK_CASES).map((kind) => [kind, queue.filter((row) => row.kind === kind)]).filter(([, rows]) => rows.length);
+    const list = groups.length
+      ? `<ul class="inbox-queue">${groups.map(([kind, rows]) => `<li><span class="inbox-queue-count">${count(rows.length)}</span><span><strong>${esc(caseLabel(kind))}</strong><small>${esc(TALK_CASES[kind][1])}</small></span><span class="inbox-queue-people">${rows.slice(0, 5).map((row) => `<button class="bubble" type="button" data-open-user-id="${esc(row.user_id)}" title="${esc(`${row.name || row.email || "Conta"}${row.last_step ? ` · último passo: ${row.last_step}` : ""}`)}" aria-label="Abrir a conta de ${esc(row.name || row.email || "usuário")}">${esc(initials(row.name, row.email))}</button>`).join("")}${rows.length > 5 ? `<span class="bubble bubble--more">+${count(rows.length - 5)}</span>` : ""}</span></li>`).join("")}</ul>`
+      : `<p class="section-copy">Ninguém na fila agora.</p>`;
+    const action = `<button class="button button--secondary button--compact" type="button" data-nav="adoption">${on ? "Ver o envio em Uso e adoção" : "Ligar o envio em Uso e adoção"}</button>`;
+    return `<article class="chat-main inbox-main inbox-main--empty"><div class="inbox-waiting">
+      <h3>Nenhuma conversa ainda</h3>
+      <p>${on ? "O envio automático está ligado: a primeira mensagem sai de segunda a sábado, das 10h às 19h, e as conversas aparecem aqui." : "O envio automático está desligado. Quando for ligado, cada pessoa da fila recebe a mensagem do próprio caso e as conversas aparecem aqui."}</p>
+      <p class="inbox-waiting-sub">Na fila, por caso (${count(queue.length)} ${queue.length === 1 ? "pessoa" : "pessoas"})</p>
+      ${list}
+      ${action}
+    </div></article>`;
+  }
+
+  function renderInbox() {
+    if (!state.inbox) return state.errors.inbox ? errorState(state.errors.inbox, "inbox") : loadingState("Carregando as conversas…");
+    const all = state.inbox.conversations || [];
+    const visible = inboxFiltered();
+    const chosen = state.inboxSel != null ? all.find((talk) => String(talk.id) === String(state.inboxSel)) : null;
+    const shown = chosen || visible[0] || null;
+    const counts = Object.fromEntries(Object.keys(TALK_CASES).map((kind) => [kind, all.filter((talk) => talk.kind === kind).length]));
+    const views = INBOX_VIEWS.map(([id, label]) => {
+      const n = id === "all" ? all.length : id === "replied" ? all.filter(inboxAnswered).length : all.filter((talk) => talk.needs_human).length;
+      return `<button class="filter-chip" type="button" data-inbox-view="${id}" aria-pressed="${state.inboxView === id}">${esc(label)} <small>${count(n)}</small></button>`;
+    }).join("");
+    const caseSelect = `<select id="inbox-case" class="toolbar-select" aria-label="Filtrar por caso"><option value="all">Todos os casos</option>${Object.keys(TALK_CASES).map((kind) => `<option value="${kind}">${esc(caseLabel(kind))} (${count(counts[kind])})</option>`).join("")}</select>`;
+    const side = `<aside class="chat-side inbox-side">
+      <div class="chat-side-head"><h3 class="section-title">Conversas</h3><button class="icon-button icon-button--sm" type="button" data-refresh-resource="inbox" aria-label="Atualizar conversas" title="Atualizar">${icon("refresh", state.loading.inbox ? "icon spin" : "icon")}</button></div>
+      ${all.length ? `<div class="chat-side-search"><label class="search-field">${icon("search")}<input id="inbox-search" type="search" value="${esc(state.inboxSearch)}" placeholder="Buscar nome, e-mail ou telefone" aria-label="Buscar conversas"></label></div>
+      <div class="inbox-filters">${views}${caseSelect}</div>` : ""}
+      <div id="inbox-list" class="chat-side-list">${renderInboxList()}</div>
+    </aside>`;
+    const main = !all.length ? renderInboxWaiting()
+      : shown ? renderInboxChat(shown)
+      : `<article class="chat-main inbox-main inbox-main--empty">${emptyState("Nenhuma conversa com este filtro", "Mude o filtro ou a busca para ver as conversas.", "message")}</article>`;
+    return `<section class="chat-shell inbox-shell${chosen ? " has-selection" : ""}${refreshingClass("inbox")}">${side}${main}</section>`;
   }
 
   function featureRows(features, mode) {
@@ -5049,7 +5276,7 @@
     const providerInput = state.page === "assistant" && state.ai.tab === "connection" ? $("ai-provider-key") : null;
     const providerFocused = providerInput && active === providerInput;
     const aiFocus = state.page === "assistant" && active?.matches("[data-ai-field]") ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
-    const renderers = { overview: renderOverview, growth: renderGrowth, sales: renderSales, adoption: renderAdoption, users: renderUsers, referrals: renderReferrals, diagnostics: renderDiagnostics, traces: renderTraces, vitals: renderVitals, news: renderNews, assistant: renderAiAssistant, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast };
+    const renderers = { overview: renderOverview, growth: renderGrowth, sales: renderSales, adoption: renderAdoption, users: renderUsers, referrals: renderReferrals, diagnostics: renderDiagnostics, traces: renderTraces, vitals: renderVitals, news: renderNews, assistant: renderAiAssistant, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast, conversations: renderInbox };
     els.page.innerHTML = renderers[state.page]?.() || "";
     if (providerInput && $("ai-provider-key")) {
       providerInput.disabled = state.ai.providerSaving;
@@ -5066,6 +5293,11 @@
       growComposer($("broadcast-message"));
       stickChatToBottom();
     }
+    if (state.page === "conversations") {
+      const canvas = $("inbox-canvas");
+      if (canvas) canvas.scrollTop = canvas.scrollHeight;
+      if ($("inbox-case")) $("inbox-case").value = state.inboxCase;
+    }
     if (state.page === "users") {
       if ($("user-license-filter")) $("user-license-filter").value = state.userFilter.license;
       if ($("user-activity-filter")) $("user-activity-filter").value = state.userFilter.activity;
@@ -5075,7 +5307,7 @@
   }
 
   function retryResource(resource) {
-    const loaders = { growth: loadGrowth, sales: loadSales, adoption: loadAdoption, referrals: loadReferrals, devices: loadDevices, diagnostics: loadDiagnostics, map: loadMap, winback: loadWinback, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, vitals: loadVitals, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
+    const loaders = { growth: loadGrowth, sales: loadSales, adoption: loadAdoption, referrals: loadReferrals, devices: loadDevices, diagnostics: loadDiagnostics, map: loadMap, winback: loadWinback, inbox: loadInbox, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, vitals: loadVitals, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
     loaders[resource]?.();
   }
 
@@ -5093,6 +5325,9 @@
     if (target.dataset.useState) { state.useState = target.dataset.useState; return renderCurrentPage(); }
     if (target.dataset.featureMode) { state.featureMode = target.dataset.featureMode; return renderCurrentPage(); }
     if (target.dataset.winbackToggle) return toggleWinback(target.dataset.winbackToggle === "on");
+    if (target.dataset.inboxOpen) { state.inboxSel = target.dataset.inboxOpen; return renderCurrentPage(); }
+    if (target.hasAttribute("data-inbox-back")) { state.inboxSel = null; return renderCurrentPage(); }
+    if (target.dataset.inboxView) { state.inboxView = target.dataset.inboxView; return renderCurrentPage(); }
     if (target.dataset.talkToggle) {
       const id = target.dataset.talkToggle;
       if (state.talkOpen.has(id)) state.talkOpen.delete(id); else state.talkOpen.add(id);
@@ -5169,6 +5404,10 @@
       state.referralFilter = event.target.value;
       const results = $("referral-results"); if (results) results.innerHTML = renderReferralResults();
     }
+    if (event.target.id === "inbox-search") {
+      state.inboxSearch = event.target.value;
+      const list = $("inbox-list"); if (list) list.innerHTML = renderInboxList();
+    }
     if (event.target.id === "trace-search") {
       state.traceFilter = event.target.value;
       const position = event.target.selectionStart;
@@ -5218,6 +5457,7 @@
 
   els.page.addEventListener("change", (event) => {
     if (event.target.dataset.aiField) return onAiInput(event.target);
+    if (event.target.id === "inbox-case") { state.inboxCase = TALK_CASES[event.target.value] ? event.target.value : "all"; return renderCurrentPage(); }
     if (event.target.id === "ai-period") { state.ai.days = [7, 30, 90].includes(Number(event.target.value)) ? Number(event.target.value) : 30; return loadAiMetrics(); }
     if (event.target.id === "broadcast-file") {
       const file = event.target.files?.[0];

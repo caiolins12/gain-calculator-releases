@@ -773,6 +773,98 @@ dialog::backdrop { background: rgba(2,6,10,.72); backdrop-filter: blur(4px); }
 .progress-fill { height: 100%; border-radius: inherit; background: var(--green); transition: width .25s; }
 .progress-copy { display: flex; justify-content: space-between; margin-top: 0.4375rem; color: var(--muted); font-size: 0.5rem; }
 
+/* Conversas (retorno pelo WhatsApp) -------------------------------------
+   A mesma gramática dos Comunicados, agora com os dois lados: o que a Gain IA
+   mandou fica à direita, em verde; o que a pessoa respondeu, à esquerda, em
+   neutro. A página é só de leitura, então o rodapé diz isso no lugar do campo
+   de escrita. */
+.inbox-shell { height: clamp(28rem, calc(100dvh - 10.5rem), 52rem); }
+.inbox-filters { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; padding: 0.625rem 0.9375rem 0.25rem; }
+.inbox-filters .filter-chip small { margin-left: 0.1875rem; opacity: .7; font-variant-numeric: tabular-nums; }
+.inbox-filters .toolbar-select { flex: 1 1 100%; min-width: 0; }
+.inbox-side .search-field input, .inbox-filters .toolbar-select { min-height: 2.25rem; height: 2.25rem; font-size: 0.5625rem; }
+.inbox-row {
+  width: 100%; display: flex; align-items: flex-start; gap: 0.625rem; padding: 0.625rem 0.5rem;
+  border: 0; border-radius: 0.625rem; background: transparent; color: var(--text); font: inherit; text-align: left;
+  cursor: pointer; transition: background .15s ease-out;
+}
+.inbox-row + .inbox-row { margin-top: 0.125rem; }
+.inbox-row:hover { background: rgba(255,255,255,.035); }
+.inbox-row.is-active { background: rgba(52,212,123,.09); }
+.inbox-row:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+.inbox-row .avatar { width: 2.25rem; height: 2.25rem; flex: 0 0 auto; font-size: 0.5rem; }
+.inbox-row-copy { min-width: 0; flex: 1; display: grid; gap: 0.1875rem; }
+.inbox-row-line { min-width: 0; display: flex; align-items: center; gap: 0.375rem; }
+.inbox-row-line strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.625rem; font-weight: 650; }
+.inbox-row-line time { flex: 0 0 auto; color: var(--muted); font-size: 0.4688rem; font-variant-numeric: tabular-nums; }
+.inbox-row-line time.is-new { color: var(--green); font-weight: 700; }
+.inbox-row-preview { color: var(--text-soft); font-size: 0.5313rem; }
+.inbox-row-preview > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inbox-row-preview .icon { width: 0.75rem; height: 0.75rem; flex: 0 0 auto; color: var(--muted); }
+.inbox-row-preview .icon.is-sent { color: #63d8ff; }
+.inbox-row-preview .icon.is-failed { color: var(--red); }
+.inbox-dot { width: 0.5rem; height: 0.5rem; flex: 0 0 auto; border-radius: 50%; background: var(--green); }
+.inbox-row-meta { display: flex; flex-wrap: wrap; gap: 0.125rem 0.5rem; color: var(--muted); font-size: 0.4688rem; }
+.inbox-tone--green { color: var(--green); }
+.inbox-tone--blue { color: var(--blue); }
+.inbox-tone--purple { color: var(--purple); }
+.inbox-tone--yellow { color: var(--yellow); }
+.inbox-tone--red { color: var(--red); }
+.inbox-tone--neutral { color: var(--muted); }
+
+.inbox-main .chat-top .avatar { flex: 0 0 auto; }
+.inbox-back { display: none; flex: 0 0 auto; }
+.inbox-back .icon { transform: rotate(180deg); }
+.inbox-outcome {
+  flex: 0 0 auto; display: grid; gap: 0.5rem; padding: 0.625rem 0.9375rem;
+  border-bottom: 1px solid var(--line-soft); background: rgba(255,255,255,.02);
+}
+.inbox-outcome-flags { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+.inbox-outcome dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem 1rem; margin: 0; }
+.inbox-outcome dt { color: var(--muted); font-size: 0.4688rem; font-weight: 700; }
+.inbox-outcome dd { margin: 0.125rem 0 0; font-size: 0.5625rem; line-height: 1.55; }
+.inbox-outcome-wide { grid-column: 1 / -1; }
+.inbox-foot {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 0.9375rem;
+  border-top: 1px solid var(--line-soft); background: rgba(0,0,0,.18); color: var(--muted); font-size: 0.5rem; line-height: 1.5;
+}
+.inbox-foot .icon { width: 0.875rem; height: 0.875rem; flex: 0 0 auto; }
+
+.chat-line { display: flex; margin-top: 0.375rem; }
+.chat-line--out { justify-content: flex-end; }
+.chat-line--in { justify-content: flex-start; }
+.chat-stack { display: grid; gap: 0.1875rem; max-width: min(80%, 34rem); }
+.chat-stack .chat-bubble { max-width: none; margin-left: 0; }
+.chat-bubble--in { border-radius: 0.25rem 0.75rem 0.75rem 0.75rem; background: var(--surface-3); color: var(--text); }
+.chat-bubble--in .bubble-meta { color: var(--muted); }
+.chat-bubble-footer { display: block; margin-top: 0.375rem; color: rgba(215,240,228,.6); font-size: 0.5rem; }
+.chat-bubble-tag { display: flex; align-items: center; gap: 0.25rem; margin-bottom: 0.25rem; color: var(--muted); font-size: 0.4688rem; font-weight: 700; }
+.chat-bubble-tag .icon { width: 0.75rem; height: 0.75rem; }
+.chat-quick { display: grid; gap: 0.1875rem; }
+.chat-quick span {
+  padding: 0.4375rem 0.75rem; border-radius: 0.5rem; background: #0f3c2d; color: #63d8ff;
+  font-size: 0.5625rem; font-weight: 650; text-align: center;
+}
+.chat-day { display: flex; justify-content: center; margin: 0.875rem 0 0.375rem; }
+.chat-day span { padding: 0.25rem 0.625rem; border-radius: 0.5rem; background: var(--surface-2); color: var(--text-soft); font-size: 0.5rem; font-weight: 700; }
+.chat-late { margin: 0; color: var(--yellow); font-size: 0.4688rem; }
+
+.inbox-main--empty { justify-content: center; overflow-y: auto; }
+.inbox-waiting { width: 100%; max-width: 36rem; margin: auto; padding: 1.5rem; }
+.inbox-waiting h3 { margin: 0; font-size: 0.875rem; letter-spacing: -.02em; }
+.inbox-waiting p { margin: 0.5rem 0 0; color: var(--text-soft); font-size: 0.625rem; line-height: 1.6; }
+.inbox-waiting .inbox-waiting-sub { margin-top: 1.25rem; color: var(--muted); font-size: 0.5rem; font-weight: 700; }
+.inbox-queue { display: grid; gap: 0.5rem; margin: 0.625rem 0 1rem; padding: 0; list-style: none; }
+.inbox-queue li {
+  display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto; align-items: center; gap: 0.75rem;
+  padding: 0.625rem 0.75rem; border: 1px solid var(--line-soft); border-radius: var(--radius);
+}
+.inbox-queue-count { font-size: 0.875rem; font-weight: 800; font-variant-numeric: tabular-nums; text-align: center; }
+.inbox-queue strong, .inbox-queue small { display: block; }
+.inbox-queue strong { font-size: 0.625rem; }
+.inbox-queue small { margin-top: 0.125rem; color: var(--muted); font-size: 0.5rem; }
+.inbox-queue-people { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.25rem; max-width: 12rem; }
+
 /* Versões e rastros */
 .version-list { display: grid; gap: 0.625rem; }
 .version-row { display: grid; grid-template-columns: minmax(5rem,.55fr) minmax(0,1.5fr) 2.75rem 2.75rem; align-items: center; gap: 0.75rem; padding: 0.6875rem 0; border-bottom: 1px solid var(--line-soft); }
@@ -869,6 +961,13 @@ dialog::backdrop { background: rgba(2,6,10,.72); backdrop-filter: blur(4px); }
   .chat-shell { grid-template-columns: 1fr; height: auto; }
   .chat-side { max-height: 26rem; }
   .chat-main { height: clamp(26rem, calc(100dvh - 14rem), 40rem); }
+  /* Conversas: uma coluna por vez, como no mensageiro do celular. */
+  .inbox-shell .chat-side { max-height: none; height: clamp(26rem, calc(100dvh - 12rem), 44rem); }
+  .inbox-shell .inbox-main--empty { height: auto; }
+  .inbox-shell.has-selection .inbox-side { display: none; }
+  .inbox-shell.has-selection .inbox-back { display: grid; }
+  .inbox-shell:not(.has-selection) .inbox-main:not(.inbox-main--empty) { display: none; }
+  .inbox-shell:not(.has-selection) .inbox-row.is-active { background: transparent; }
   .auth-shell { grid-template-columns: .9fr 1.1fr; }
   .auth-story { padding: 2.375rem; }
   .auth-message h1 { font-size: 3rem; }
@@ -1712,4 +1811,14 @@ span.ref-card-head { cursor: default; }
   .heat-strip { overflow-x: auto; max-width: 100%; }
   .feat-panel .panel-head, .wb-panel .panel-head { flex-wrap: wrap; }
   .feat-panel .segmented { width: 100%; }
+}
+
+/* Conversas no celular: o cabeçalho guarda nome e ação; o estado vai para a
+   faixa do resultado, e o resultado empilha. */
+@media (max-width: 600px) {
+  .inbox-main .chat-top > .status-pill { display: none; }
+  .inbox-outcome dl { grid-template-columns: 1fr; }
+  .chat-stack { max-width: 88%; }
+  .inbox-queue li { grid-template-columns: 2rem minmax(0, 1fr); }
+  .inbox-queue-people { grid-column: 1 / -1; justify-content: flex-start; max-width: none; }
 }
