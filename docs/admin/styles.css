@@ -1589,6 +1589,9 @@ span.ref-card-head { cursor: default; }
 .promo-card-title { display: grid; flex: 1 1 auto; gap: 0.25rem; min-width: 0; justify-items: start; }
 .promo-card-title .cell-secondary { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ref-card-foot .promo-actions { flex-wrap: wrap; }
+/* "30 dias do Essencial" quebra a linha em vez de virar "30 dias do E…". */
+.promo-card-stats:not(.ref-card-stats--two) { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.6fr); }
+.promo-card-stats strong:not(.ref-code) { overflow: visible; white-space: normal; }
 .promo-summary { margin: 0.875rem 0 0; padding: 0.75rem 0.875rem; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--bg-soft); color: var(--text-soft); font-size: 0.625rem; line-height: 1.5; }
 
 /* ── Trilha de novos usuários e mapa de uso (12/11/2026) ──────────────────

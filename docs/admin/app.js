@@ -3053,8 +3053,9 @@
     if (asNumber(code.starts_ms) > now) return [`a partir de ${shortDate(code.starts_ms)}`, last ? `até ${shortDate(last)}` : "sem prazo"];
     if (!last) return ["Sem prazo", `desde ${shortDate(code.starts_ms)}`];
     if (asNumber(code.expires_ms) <= now) return [`até ${shortDate(last)}`, "prazo encerrado"];
-    const left = Math.max(1, Math.ceil((asNumber(code.expires_ms) - now) / DAY_MS));
-    return [`até ${shortDate(last)}`, left === 1 ? "último dia" : `faltam ${count(left)} dias`];
+    /* Dias inteiros que faltam: hoje, se acaba hoje, é o último dia. */
+    const left = Math.floor((asNumber(code.expires_ms) - now) / DAY_MS);
+    return [`até ${shortDate(last)}`, left < 1 ? "último dia" : left === 1 ? "falta 1 dia" : `faltam ${count(left)} dias`];
   }
 
   function promoUses(code) {
@@ -3141,7 +3142,7 @@
       const [prazo, prazoSub] = promoWindow(code);
       return `<article class="mobile-data-card ref-card${expanded ? " is-open" : ""}">
         <button class="ref-card-head" type="button" data-promo-open="${esc(code.id)}" aria-expanded="${expanded}"><span class="promo-card-title"><span class="ref-code">${esc(code.code)}</span>${code.note ? `<span class="cell-secondary">${esc(code.note)}</span>` : ""}</span>${pill(label, tone)}<span class="row-arrow ref-chevron">${icon("chevron-down")}</span></button>
-        <span class="ref-card-stats"><span><small>Dá</small><strong>${esc(promoReward(code))}</strong></span><span><small>Resgate</small><strong>${esc(prazo)}</strong></span><span><small>Usos</small><strong>${esc(promoUses(code))}</strong></span></span>
+        <span class="ref-card-stats promo-card-stats"><span><small>Dá</small><strong>${esc(promoReward(code))}</strong></span><span><small>Resgate</small><strong>${esc(prazo)}</strong></span><span><small>Usos</small><strong>${esc(promoUses(code))}</strong></span></span>
         <span class="ref-card-foot"><span>${esc(prazoSub)}</span>${promoCodeActions(code)}</span>
         ${expanded ? promoNested(code.rows) : ""}
       </article>`;
@@ -3163,7 +3164,7 @@
       const [label, tone, sub] = promoRedemptionState(row);
       return `<article class="mobile-data-card ref-card">
         <span class="ref-card-head">${referralPersonCell(promoPerson(row), row.internal)}${pill(label, tone)}</span>
-        <span class="ref-card-stats ref-card-stats--two"><span><small>Código</small><strong class="ref-code">${esc(row.code)}</strong></span><span><small>Ganhou</small><strong>${esc(promoReward(row))}</strong></span></span>
+        <span class="ref-card-stats ref-card-stats--two promo-card-stats"><span><small>Código</small><strong class="ref-code">${esc(row.code)}</strong></span><span><small>Ganhou</small><strong>${esc(promoReward(row))}</strong></span></span>
         <span class="ref-card-foot"><span>${esc(shortDate(row.created_ms))}${sub ? ` · ${esc(sub)}` : ""}</span>${contactActions(promoPerson(row))}</span>
       </article>`;
     }).join("");
