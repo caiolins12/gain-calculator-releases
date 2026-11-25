@@ -1583,6 +1583,14 @@ span.ref-card-head { cursor: default; }
   .ref-nested-row .row-actions { grid-column: 2; grid-row: 2; justify-self: end; }
 }
 
+/* ── Códigos promocionais (25/11/2026) ─────────────────────────────────── */
+.promo-note { display: block; margin-top: 0.3125rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.promo-table .promo-actions { flex-wrap: nowrap; }
+.promo-card-title { display: grid; flex: 1 1 auto; gap: 0.25rem; min-width: 0; justify-items: start; }
+.promo-card-title .cell-secondary { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref-card-foot .promo-actions { flex-wrap: wrap; }
+.promo-summary { margin: 0.875rem 0 0; padding: 0.75rem 0.875rem; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--bg-soft); color: var(--text-soft); font-size: 0.625rem; line-height: 1.5; }
+
 /* ── Trilha de novos usuários e mapa de uso (12/11/2026) ──────────────────
    As duas telas mostram pessoas, não percentuais: bolinhas na trilha, um
    quadradinho por dia de uso, e dois quadros que dizem o que vai bem e onde

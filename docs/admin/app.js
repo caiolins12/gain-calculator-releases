@@ -14,6 +14,7 @@
     adoption: { eyebrow: "Negócio", title: "Uso e adoção", description: "Quem usa, quem esfriou, por que pararam e o que cada um usa." },
     users: { eyebrow: "Clientes", title: "Usuários", description: "Contas, licenças, dispositivos e uso do monitoramento." },
     referrals: { eyebrow: "Clientes", title: "Indicações", description: "Indique e ganhe: quem indicou, quantos entraram e o que cada lado ganhou." },
+    promos: { eyebrow: "Clientes", title: "Códigos promocionais", description: "Códigos que dão dias de um plano: prazo, limite e quem resgatou." },
     broadcast: { eyebrow: "Clientes", title: "Comunicados", description: "Envio controlado de mensagens para números verificados ou uma lista manual." },
     conversations: { eyebrow: "Clientes", title: "Conversas", description: "Conversas de retorno pelo WhatsApp: o que a Gain IA perguntou e o que cada pessoa respondeu." },
     assistant: { eyebrow: "Produto", title: "Gain IA", description: "Modelo, gasto com a OpenAI, experiência no app e uso por conta." },
@@ -55,6 +56,10 @@
     referralFilter: "",
     referralTab: "ranking",
     referralOpen: new Set(),
+    promos: null,
+    promoFilter: "",
+    promoTab: "codes",
+    promoOpen: new Set(),
     period: storedPeriod(),
     growth: null,
     sales: null,
@@ -677,6 +682,7 @@
         adoption: () => Promise.allSettled([loadAdoption({ quiet: true }), loadMap({ quiet: true }), loadWinback({ quiet: true })]),
         users: () => Promise.allSettled([loadDevices({ quiet: true }), loadVersions({ quiet: true })]),
         referrals: () => loadReferrals({ quiet: true }),
+        promos: () => loadPromos({ quiet: true }),
         diagnostics: () => loadDiagnostics({ quiet: true }),
         news: () => loadNews({ quiet: true }),
         traces: () => loadTraces({ quiet: true }),
@@ -739,6 +745,7 @@
     if (page === "traces" && !state.traces && !state.loading.traces) loadTraces();
     if (page === "vitals" && !state.vitals && !state.loading.vitals) loadVitals();
     if (page === "referrals" && !state.referrals && !state.loading.referrals) loadReferrals();
+    if (page === "promos" && !state.promos && !state.loading.promos) loadPromos();
     if (page === "news" && !state.news && !state.loading.news) loadNews();
     if (page === "assistant") {
       if (!state.ai.config && !state.loading.aiConfig) loadAiAssistant();
@@ -2971,6 +2978,397 @@
     const lists = referralLists();
     const toolbar = `<div class="ref-toolbar">${referralTabs(lists.totals)}<label class="search-field">${icon("search")}<input id="referral-search" type="search" value="${esc(state.referralFilter)}" placeholder="Nome, e-mail, telefone ou código" aria-label="Buscar indicações por nome, e-mail, telefone ou código"></label></div>`;
     return header + tiles + notice + toolbar + `<div id="referral-results">${renderReferralResults()}</div>`;
+  }
+
+  /* Códigos promocionais ------------------------------------------------- */
+  /* O dono cria códigos que dão dias de um plano (20261125120000). O app
+     resgata em Ajustes › Pagamentos e Assinaturas › Código promocional: uma
+     vez por conta e por número de telefone, dentro do prazo. Quem assina pela
+     Play fica com a próxima cobrança adiada pelos dias do código.
+
+     Duas abas: os códigos (a linha abre quem resgatou) e todos os resgates. */
+  const PROMO_TABS = [["codes", "Códigos", "ticket"], ["redemptions", "Resgates", "users"]];
+  const PROMO_TIERS = [["essential", "Essencial"], ["pro", "Pro"], ["ultra", "Ultra"]];
+  const PROMO_ERRORS = {
+    forbidden: "Sem permissão.",
+    invalid_code: "O código precisa ter de 3 a 20 letras ou números.",
+    code_taken: "Já existe um código com esse texto.",
+    invalid_tier: "Escolha o plano.",
+    invalid_days: "Os dias vão de 1 a 366.",
+    invalid_dates: "O fim do resgate precisa ser depois do início.",
+    invalid_limit: "O limite precisa ser 1 ou mais (vazio = sem limite).",
+    invalid_note: "A descrição tem até 200 caracteres.",
+    invalid_request: "Confira os campos e tente de novo.",
+    not_found: "Código não encontrado. Atualize a página.",
+    has_redemptions: "Este código já foi resgatado: desligue em vez de excluir."
+  };
+
+  function loadPromos(options = {}) {
+    return loadResource("promos", () => rpc("admin_promo_overview", {}), (result) => {
+      if (result?.success === false) throw new Error("Sem permissão para consultar os códigos promocionais.");
+      state.promos = result;
+    }, options);
+  }
+
+  function promoTierName(tier) {
+    return (PROMO_TIERS.find(([id]) => id === tier) || PROMO_TIERS[0])[1];
+  }
+
+  function promoReward(row) {
+    const days = asNumber(row.days);
+    return `${count(days)} ${days === 1 ? "dia" : "dias"} do ${promoTierName(row.tier)}`;
+  }
+
+  /* "AAAA-MM-DD" no fuso do navegador ↔ milissegundos. O fim do resgate é
+     o fim do dia escolhido (meia-noite do dia seguinte). */
+  function promoDateInput(ms) {
+    if (!(asNumber(ms) > 0)) return "";
+    const d = new Date(asNumber(ms));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  function promoDateMs(value, endOfDay = false) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+    if (!m) return null;
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + (endOfDay ? 1 : 0)).getTime();
+  }
+
+  /* O último dia em que o código ainda vale. */
+  function promoLastDay(expiresMs) {
+    return asNumber(expiresMs) > 0 ? asNumber(expiresMs) - 1 : null;
+  }
+
+  /* A situação do código: [rótulo, tom]. */
+  function promoState(code, now = state.promos?.server_ms || Date.now()) {
+    if (!code.active) return ["Desligado", "neutral"];
+    if (asNumber(code.starts_ms) > now) return ["Agendado", "blue"];
+    if (code.expires_ms && asNumber(code.expires_ms) <= now) return ["Expirado", "yellow"];
+    if (code.max_redemptions && asNumber(code.redemptions) >= asNumber(code.max_redemptions)) return ["Esgotado", "purple"];
+    return ["Valendo", "green"];
+  }
+
+  /* A janela de resgate em texto: [linha principal, linha de apoio]. */
+  function promoWindow(code, now = state.promos?.server_ms || Date.now()) {
+    const last = promoLastDay(code.expires_ms);
+    if (asNumber(code.starts_ms) > now) return [`a partir de ${shortDate(code.starts_ms)}`, last ? `até ${shortDate(last)}` : "sem prazo"];
+    if (!last) return ["Sem prazo", `desde ${shortDate(code.starts_ms)}`];
+    if (asNumber(code.expires_ms) <= now) return [`até ${shortDate(last)}`, "prazo encerrado"];
+    const left = Math.max(1, Math.ceil((asNumber(code.expires_ms) - now) / DAY_MS));
+    return [`até ${shortDate(last)}`, left === 1 ? "último dia" : `faltam ${count(left)} dias`];
+  }
+
+  function promoUses(code) {
+    return code.max_redemptions ? `${count(code.redemptions)} de ${count(code.max_redemptions)}` : count(code.redemptions);
+  }
+
+  /* Como os dias chegaram a quem resgatou: [rótulo, tom, linha de apoio]. */
+  function promoRedemptionState(row) {
+    if (!row.user_id) return ["Conta excluída", "neutral", ""];
+    if (row.reward_kind === "play") return ["Play adiada", "blue", row.granted_until_ms ? `cobrança em ${shortDate(row.granted_until_ms)}` : ""];
+    if (row.reward_kind === "play_pending") return ["Play pendente", "yellow", `${plural(row.reward_attempts, "tentativa", "tentativas")}`];
+    return ["No acesso", "green", row.granted_until_ms ? `até ${shortDate(row.granted_until_ms)}` : ""];
+  }
+
+  function promoRedemptionStatusCell(row) {
+    const [label, tone, sub] = promoRedemptionState(row);
+    return `${pill(label, tone)}${sub ? `<span class="cell-secondary ref-status-sub">${esc(sub)}</span>` : ""}`;
+  }
+
+  function promoPerson(row) {
+    return { user_id: row.user_id, name: row.name, email: row.email || (row.user_id ? "" : "Conta excluída"), phone: row.phone };
+  }
+
+  function promoLists() {
+    const data = state.promos || {};
+    const query = state.promoFilter || "";
+    const codes = data.codes || [];
+    const redemptions = data.redemptions || [];
+    const byCode = new Map();
+    redemptions.forEach((row) => {
+      if (!byCode.has(row.code_id)) byCode.set(row.code_id, []);
+      byCode.get(row.code_id).push(row);
+    });
+    const matchRow = (row) => referralMatches(query, row.name, row.email, row.phone, row.code);
+    return {
+      codes: codes.map((code) => ({ ...code, rows: byCode.get(code.id) || [] }))
+        .filter((code) => referralMatches(query, code.code, code.note) || code.rows.some(matchRow)),
+      redemptions: redemptions.filter(matchRow),
+      totals: { codes: codes.length, redemptions: redemptions.length }
+    };
+  }
+
+  function promoTabs(totals) {
+    if (!PROMO_TABS.some(([id]) => id === state.promoTab)) state.promoTab = "codes";
+    return `<div class="ai-tabs ref-tabs" role="tablist" aria-label="Seções dos códigos promocionais">${PROMO_TABS.map(([id, label, iconName]) => {
+      const selected = state.promoTab === id;
+      return `<button type="button" role="tab" data-promo-tab="${id}" aria-selected="${selected}" tabindex="${selected ? 0 : -1}">${icon(iconName)}<span>${esc(label)}</span><span class="ref-tab-count">${count(totals[id])}</span></button>`;
+    }).join("")}</div>`;
+  }
+
+  function promoCodeActions(code) {
+    const del = asNumber(code.redemptions) === 0
+      ? `<button class="icon-button icon-button--sm icon-button--danger" type="button" data-promo-delete="${esc(code.id)}" title="Excluir código" aria-label="Excluir o código ${esc(code.code)}">${icon("trash")}</button>` : "";
+    return `<span class="row-actions promo-actions">
+      <button class="button button--secondary button--compact" type="button" data-promo-edit="${esc(code.id)}">Editar</button>
+      <button class="button button--secondary button--compact" type="button" data-promo-toggle="${esc(code.id)}">${code.active ? "Desligar" : "Ligar"}</button>${del}</span>`;
+  }
+
+  function promoNested(rows) {
+    if (!rows.length) return plainNotice("Ninguém resgatou este código ainda.", "ticket");
+    return `<div class="ref-nested">${rows.map((row) => `<div class="ref-nested-row">${referralPersonCell(promoPerson(row), row.internal)}<span class="ref-nested-date">${esc(dateTime(row.created_ms))}</span><span class="ref-nested-status">${promoRedemptionStatusCell(row)}</span>${contactActions(promoPerson(row))}</div>`).join("")}</div>`;
+  }
+
+  function renderPromoCodes(list, total) {
+    if (!list.length) return `<div class="table-card">${emptyState("Nenhum código encontrado", "Ajuste a busca.", "search")}</div>`;
+    const open = state.promoOpen;
+    const rows = list.map((code) => {
+      const expanded = open.has(code.id);
+      const [label, tone] = promoState(code);
+      const [prazo, prazoSub] = promoWindow(code);
+      return `<tr tabindex="0" data-action="promo-toggle" data-promo-open="${esc(code.id)}" aria-expanded="${expanded}" class="${expanded ? "is-open" : ""}">
+        <td><span class="ref-code">${esc(code.code)}</span>${code.note ? `<span class="cell-secondary promo-note">${esc(code.note)}</span>` : ""}</td>
+        <td><span class="cell-primary">${esc(promoReward(code))}</span></td>
+        <td><span class="cell-primary">${esc(prazo)}</span><span class="cell-secondary">${esc(prazoSub)}</span></td>
+        <td class="ref-num"><span class="cell-metric">${esc(promoUses(code))}</span><span class="cell-secondary">${asNumber(code.last_7d) ? `+${count(code.last_7d)} na semana` : "&nbsp;"}</span></td>
+        <td>${pill(label, tone)}</td>
+        <td class="cell-actions">${promoCodeActions(code)}</td>
+        <td class="cell-actions"><span class="row-arrow ref-chevron">${icon("chevron-down")}</span></td>
+      </tr>${expanded ? `<tr class="ref-expand"><td colspan="7">${promoNested(code.rows)}</td></tr>` : ""}`;
+    }).join("");
+    const cards = list.map((code) => {
+      const expanded = open.has(code.id);
+      const [label, tone] = promoState(code);
+      const [prazo, prazoSub] = promoWindow(code);
+      return `<article class="mobile-data-card ref-card${expanded ? " is-open" : ""}">
+        <button class="ref-card-head" type="button" data-promo-open="${esc(code.id)}" aria-expanded="${expanded}"><span class="promo-card-title"><span class="ref-code">${esc(code.code)}</span>${code.note ? `<span class="cell-secondary">${esc(code.note)}</span>` : ""}</span>${pill(label, tone)}<span class="row-arrow ref-chevron">${icon("chevron-down")}</span></button>
+        <span class="ref-card-stats"><span><small>Dá</small><strong>${esc(promoReward(code))}</strong></span><span><small>Resgate</small><strong>${esc(prazo)}</strong></span><span><small>Usos</small><strong>${esc(promoUses(code))}</strong></span></span>
+        <span class="ref-card-foot"><span>${esc(prazoSub)}</span>${promoCodeActions(code)}</span>
+        ${expanded ? promoNested(code.rows) : ""}
+      </article>`;
+    }).join("");
+    return `<div class="table-card"><table class="data-table ref-table promo-table"><colgroup><col style="width:22%"><col style="width:17%"><col style="width:14%"><col style="width:10%"><col style="width:10%"><col style="width:23%"><col style="width:4%"></colgroup><thead><tr><th>Código</th><th>Dá</th><th>Resgate</th><th>Usos</th><th>Situação</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-card-list">${cards}</div>${referralFooter(list.length, total, total === 1 ? "código" : "códigos")}</div>`;
+  }
+
+  function renderPromoRedemptions(list, total) {
+    if (!list.length) return `<div class="table-card">${emptyState("Nenhum resgate encontrado", state.promoFilter ? "Ajuste a busca." : "Ninguém resgatou um código ainda.", "search")}</div>`;
+    const visible = list.slice(0, 300);
+    const rows = visible.map((row) => `<tr>
+        <td>${referralPersonCell(promoPerson(row), row.internal)}</td>
+        <td><span class="ref-code ref-code--sm">${esc(row.code)}</span><span class="cell-secondary">${esc(promoReward(row))}</span></td>
+        <td><span class="cell-primary">${esc(shortDate(row.created_ms))}</span><span class="cell-secondary">${esc(relative(row.created_ms))}</span></td>
+        <td>${promoRedemptionStatusCell(row)}</td>
+        <td class="cell-actions">${contactActions(promoPerson(row))}</td>
+      </tr>`).join("");
+    const cards = visible.map((row) => {
+      const [label, tone, sub] = promoRedemptionState(row);
+      return `<article class="mobile-data-card ref-card">
+        <span class="ref-card-head">${referralPersonCell(promoPerson(row), row.internal)}${pill(label, tone)}</span>
+        <span class="ref-card-stats ref-card-stats--two"><span><small>Código</small><strong class="ref-code">${esc(row.code)}</strong></span><span><small>Ganhou</small><strong>${esc(promoReward(row))}</strong></span></span>
+        <span class="ref-card-foot"><span>${esc(shortDate(row.created_ms))}${sub ? ` · ${esc(sub)}` : ""}</span>${contactActions(promoPerson(row))}</span>
+      </article>`;
+    }).join("");
+    return `<div class="table-card"><table class="data-table ref-table"><colgroup><col style="width:32%"><col style="width:24%"><col style="width:14%"><col style="width:18%"><col style="width:12%"></colgroup><thead><tr><th>Conta</th><th>Código</th><th>Data</th><th>Como recebeu</th><th></th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-card-list">${cards}</div>${referralFooter(visible.length, total, total === 1 ? "resgate" : "resgates")}</div>`;
+  }
+
+  function renderPromoResults() {
+    const lists = promoLists();
+    if (state.promoTab === "redemptions") return renderPromoRedemptions(lists.redemptions, lists.totals.redemptions);
+    return renderPromoCodes(lists.codes, lists.totals.codes);
+  }
+
+  function renderPromos() {
+    const newButton = `<button class="button button--primary" type="button" data-promo-new>${icon("plus")} Novo código</button>`;
+    const header = pageHeading("Códigos promocionais", "Cada código dá dias de um plano e vale uma vez por conta e por número de telefone, dentro do prazo de resgate.", newButton);
+    if (!state.promos && state.loading.promos) return header + loadingState("Lendo os códigos…");
+    if (state.errors.promos && !state.promos) return header + errorState(state.errors.promos, "promos");
+    const totals = state.promos?.totals || {};
+    const tiles = `<section class="metric-grid${refreshingClass("promos")}">` +
+      metricCard("Códigos valendo", count(totals.live), `de ${plural(totals.codes, "criado", "criados")}`, "green", "ticket") +
+      metricCard("Resgates", count(totals.redemptions), asNumber(totals.last_7d) ? `+${count(totals.last_7d)} nesta semana` : "nenhum nesta semana", "blue", "users") +
+      metricCard("Cobrança da Play adiada", count(totals.play), "assinantes que resgataram", "purple", "wallet") +
+      `</section>`;
+    const pending = asNumber(totals.pending_play);
+    const notice = pending ? `<div class="notice notice--warning ref-notice">${icon("alert")}<span>${count(pending)} ${pending === 1 ? "adiamento" : "adiamentos"} na Play ainda por fazer. O servidor tenta de novo quando a pessoa abre a aba do código no app; depois de 4 tentativas, os dias vão para o acesso.</span></div>` : "";
+    if (!asNumber(totals.codes)) {
+      return header + tiles + emptyState("Nenhum código criado", "Crie um código com os dias e o plano que ele dá. O motorista resgata em Ajustes › Pagamentos e Assinaturas › Código promocional.", "ticket", newButton);
+    }
+    const lists = promoLists();
+    const toolbar = `<div class="ref-toolbar">${promoTabs(lists.totals)}<label class="search-field">${icon("search")}<input id="promo-search" type="search" value="${esc(state.promoFilter)}" placeholder="Código, nome, e-mail ou telefone" aria-label="Buscar códigos e resgates por código, nome, e-mail ou telefone"></label></div>`;
+    return header + tiles + notice + toolbar + `<div id="promo-results">${renderPromoResults()}</div>`;
+  }
+
+  /* O editor de um código, na janela de detalhe. */
+  function openPromoEditor(id = null) {
+    const original = id ? (state.promos?.codes || []).find((code) => code.id === id) : null;
+    const today = promoDateInput(Date.now());
+    const item = original ? {
+      id: original.id,
+      code: original.code,
+      tier: original.tier,
+      days: String(original.days),
+      start_date: promoDateInput(original.starts_ms),
+      end_date: promoDateInput(promoLastDay(original.expires_ms)),
+      max_redemptions: original.max_redemptions ? String(original.max_redemptions) : "",
+      note: original.note || "",
+      active: !!original.active
+    } : {
+      id: null, code: "", tier: "essential", days: "30",
+      start_date: today, end_date: promoDateInput(Date.now() + 15 * DAY_MS),
+      max_redemptions: "", note: "", active: true
+    };
+    state.detail = { type: "promo", isNew: !original, original, item, saving: false, error: "" };
+    renderPromoEditor();
+    if (!els.detail.open) els.detail.showModal();
+  }
+
+  /* "30 dias do Essencial · resgate de 25/11/26 até 10/12/26 · sem limite". */
+  function promoSummary(item) {
+    const days = Math.floor(asNumber(item.days));
+    const parts = [days >= 1 ? `${count(days)} ${days === 1 ? "dia" : "dias"} do ${promoTierName(item.tier)}` : "Informe os dias"];
+    const start = promoDateMs(item.start_date), end = promoDateMs(item.end_date, true);
+    parts.push(end ? `resgate de ${shortDate(start || Date.now())} até ${shortDate(end - 1)}` : `resgate a partir de ${shortDate(start || Date.now())}, sem prazo`);
+    parts.push(asNumber(item.max_redemptions) >= 1 ? `até ${plural(Math.floor(asNumber(item.max_redemptions)), "resgate", "resgates")}` : "sem limite de resgates");
+    return parts.join(" · ");
+  }
+
+  function promoField(name, label, value, { type = "text", placeholder = "", hint = "", maxlength = 200, readonly = false, min = "", max = "" } = {}) {
+    const id = `promo-${name}`;
+    const extra = `${min !== "" ? ` min="${min}"` : ""}${max !== "" ? ` max="${max}"` : ""}${readonly ? " readonly" : ""}`;
+    return `<label class="field-label" for="${id}">${esc(label)}</label><input id="${id}" data-promo-field="${name}" type="${type}" maxlength="${maxlength}" placeholder="${esc(placeholder)}" value="${esc(value)}"${extra}${hint ? ` aria-describedby="${id}-hint"` : ""}>${hint ? `<p class="field-hint" id="${id}-hint">${esc(hint)}</p>` : ""}`;
+  }
+
+  function renderPromoEditor() {
+    const detail = state.detail;
+    if (detail?.type !== "promo") return;
+    const item = detail.item;
+    const used = asNumber(detail.original?.redemptions);
+    els.detailContent.innerHTML = `<header class="detail-top">
+      <button class="icon-button" data-close-detail aria-label="Fechar">${icon("x")}</button>
+      <div class="detail-top-copy"><span class="eyebrow">${detail.isNew ? "Novo código" : "Editar código"}</span><h2 id="detail-title">${esc(item.code || "Código promocional")}</h2></div>
+      <button class="button button--primary button--compact" data-promo-save${detail.saving ? " disabled" : ""}>${detail.saving ? `${icon("loader", "icon spin")} Salvando…` : `${icon("check")} ${detail.isNew ? "Criar código" : "Salvar"}`}</button>
+    </header>
+    <div class="detail-body">
+      ${detail.error ? `<div class="notice notice--danger" role="alert">${icon("alert")}<span>${esc(detail.error)}</span></div>` : ""}
+      <p class="promo-summary" id="promo-summary">${esc(promoSummary(item))}</p>
+      <section class="detail-section">
+        <h3>O código</h3>
+        ${promoField("code", "Código", item.code, { maxlength: 20, placeholder: "SUB30", readonly: !detail.isNew, hint: detail.isNew ? "Letras e números, de 3 a 20. É o que o motorista digita; não muda depois de criado." : "Fixo: é o texto que já foi divulgado." })}
+        <div class="news-form-grid">
+          <div><label class="field-label" for="promo-tier">Plano</label><select id="promo-tier" data-promo-field="tier">${PROMO_TIERS.map(([key, label]) => `<option value="${key}"${item.tier === key ? " selected" : ""}>${label}</option>`).join("")}</select></div>
+          <div>${promoField("days", "Dias", item.days, { type: "number", min: 1, max: 366, maxlength: 3 })}</div>
+        </div>
+        <p class="field-hint">Quem assina pela Google Play fica no plano que assina: a próxima cobrança é adiada pelos dias do código.${used ? ` Mudar plano ou dias vale para os próximos resgates; os ${count(used)} já feitos ficam como estão.` : ""}</p>
+      </section>
+      <section class="detail-section">
+        <h3>Resgate</h3>
+        <div class="news-form-grid">
+          <div>${promoField("start_date", "Início do resgate", item.start_date, { type: "date" })}</div>
+          <div>${promoField("end_date", "Resgate até", item.end_date, { type: "date", hint: "Vale até o fim deste dia. Vazio = sem prazo." })}</div>
+        </div>
+        ${promoField("max_redemptions", "Limite de resgates", item.max_redemptions, { type: "number", min: 1, maxlength: 7, placeholder: "Sem limite", hint: "Vazio = sem limite. Cada conta e cada número resgatam uma vez de qualquer jeito." })}
+        <label class="news-check"><input type="checkbox" data-promo-field="active"${item.active ? " checked" : ""}><span>Ligado: pode ser resgatado</span></label>
+      </section>
+      <section class="detail-section">
+        <h3>Anotação</h3>
+        ${promoField("note", "Descrição interna", item.note, { maxlength: 200, placeholder: "Ex.: campanha do Instagram", hint: "Só aparece aqui no painel." })}
+      </section>
+    </div>`;
+  }
+
+  function onPromoInput(target) {
+    const detail = state.detail;
+    const field = target.dataset.promoField;
+    if (detail?.type !== "promo" || !field) return;
+    if (field === "code") {
+      const clean = target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 20);
+      if (clean !== target.value) target.value = clean;
+      const heading = $("detail-title"); if (heading) heading.textContent = clean || "Código promocional";
+    }
+    detail.item[field] = target.type === "checkbox" ? target.checked : target.value;
+    const summary = $("promo-summary"); if (summary) summary.textContent = promoSummary(detail.item);
+  }
+
+  function showPromoError(message) {
+    if (state.detail?.type !== "promo") return;
+    state.detail.error = message;
+    renderPromoEditor();
+    els.detail.scrollTop = 0;
+  }
+
+  async function savePromo() {
+    const detail = state.detail;
+    if (detail?.type !== "promo" || detail.saving) return;
+    const item = detail.item;
+    const code = String(item.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (detail.isNew && !/^[A-Z0-9]{3,20}$/.test(code)) return showPromoError(PROMO_ERRORS.invalid_code);
+    const days = Number(item.days);
+    if (!Number.isInteger(days) || days < 1 || days > 366) return showPromoError(PROMO_ERRORS.invalid_days);
+    const limitText = String(item.max_redemptions || "").trim();
+    const limit = limitText ? Number(limitText) : null;
+    if (limit != null && (!Number.isInteger(limit) || limit < 1)) return showPromoError(PROMO_ERRORS.invalid_limit);
+    if (!promoDateMs(item.start_date)) return showPromoError("Informe a data de início do resgate.");
+    /* Início sem mudança fica como estava; novo começando hoje vale já. */
+    const startChanged = detail.isNew || item.start_date !== promoDateInput(detail.original?.starts_ms);
+    const startsMs = !startChanged ? null : (detail.isNew && item.start_date === promoDateInput(Date.now()) ? null : promoDateMs(item.start_date));
+    const expiresMs = promoDateMs(item.end_date, true);
+    const effectiveStart = startsMs ?? (detail.isNew ? Date.now() : asNumber(detail.original?.starts_ms));
+    if (expiresMs != null && expiresMs <= effectiveStart) return showPromoError(PROMO_ERRORS.invalid_dates);
+
+    const payload = {
+      id: detail.isNew ? null : item.id,
+      code,
+      tier: item.tier,
+      days,
+      starts_ms: startsMs,
+      expires_ms: expiresMs,
+      max_redemptions: limit,
+      note: String(item.note || "").trim(),
+      active: !!item.active
+    };
+    detail.saving = true; detail.error = ""; renderPromoEditor();
+    try {
+      const result = await rpc("admin_save_promo_code", { p_item: payload });
+      if (result?.success !== true) throw new Error(PROMO_ERRORS[result?.error] || "O servidor recusou o código.");
+      toast(detail.isNew ? `Código ${code} criado` : "Código salvo", "success", detail.isNew ? "Já pode ser resgatado no app, dentro do prazo." : "Vale para os próximos resgates.");
+      if (state.detail === detail) els.detail.close();
+      await loadPromos({ quiet: true });
+    } catch (error) {
+      detail.saving = false;
+      if (state.detail === detail) showPromoError(error.message);
+    }
+  }
+
+  async function togglePromo(id) {
+    const code = (state.promos?.codes || []).find((row) => row.id === id);
+    if (!code) return;
+    try {
+      const result = await rpc("admin_set_promo_code_active", { p_id: id, p_active: !code.active });
+      if (result?.success !== true) throw new Error(PROMO_ERRORS[result?.error] || "Tente de novo em instantes.");
+      toast(code.active ? `Código ${code.code} desligado` : `Código ${code.code} ligado`, "success", code.active ? "O app passa a dizer que ele expirou." : "Já pode ser resgatado, dentro do prazo.");
+      await loadPromos({ quiet: true });
+    } catch (error) {
+      toast("Não foi possível mudar o código", "error", error?.message || String(error));
+    }
+  }
+
+  async function deletePromo(id) {
+    const code = (state.promos?.codes || []).find((row) => row.id === id);
+    if (!code) return;
+    if (!await askConfirm({
+      title: `Excluir o código ${code.code}?`,
+      message: "Ninguém resgatou este código: ele sai do painel e o texto fica livre para um código novo. Para só tirar do ar, use Desligar.",
+      label: "Excluir código",
+      danger: true
+    })) return;
+    try {
+      const result = await rpc("admin_delete_promo_code", { p_id: id });
+      if (result?.success !== true) throw new Error(PROMO_ERRORS[result?.error] || "Tente de novo em instantes.");
+      toast(`Código ${code.code} excluído`);
+      state.promoOpen.delete(id);
+      await loadPromos({ quiet: true });
+    } catch (error) {
+      toast("Não foi possível excluir", "error", error?.message || String(error));
+    }
   }
 
   /* Travamentos (Android vitals) ----------------------------------------- */
@@ -5279,7 +5677,7 @@
     const providerInput = state.page === "assistant" && state.ai.tab === "connection" ? $("ai-provider-key") : null;
     const providerFocused = providerInput && active === providerInput;
     const aiFocus = state.page === "assistant" && active?.matches("[data-ai-field]") ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
-    const renderers = { overview: renderOverview, growth: renderGrowth, sales: renderSales, adoption: renderAdoption, users: renderUsers, referrals: renderReferrals, diagnostics: renderDiagnostics, traces: renderTraces, vitals: renderVitals, news: renderNews, assistant: renderAiAssistant, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast, conversations: renderInbox };
+    const renderers = { overview: renderOverview, growth: renderGrowth, sales: renderSales, adoption: renderAdoption, users: renderUsers, referrals: renderReferrals, promos: renderPromos, diagnostics: renderDiagnostics, traces: renderTraces, vitals: renderVitals, news: renderNews, assistant: renderAiAssistant, services: renderServices, whatsapp: renderWhatsapp, broadcast: renderBroadcast, conversations: renderInbox };
     els.page.innerHTML = renderers[state.page]?.() || "";
     if (providerInput && $("ai-provider-key")) {
       providerInput.disabled = state.ai.providerSaving;
@@ -5310,7 +5708,7 @@
   }
 
   function retryResource(resource) {
-    const loaders = { growth: loadGrowth, sales: loadSales, adoption: loadAdoption, referrals: loadReferrals, devices: loadDevices, diagnostics: loadDiagnostics, map: loadMap, winback: loadWinback, inbox: loadInbox, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, vitals: loadVitals, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
+    const loaders = { growth: loadGrowth, sales: loadSales, adoption: loadAdoption, referrals: loadReferrals, promos: loadPromos, devices: loadDevices, diagnostics: loadDiagnostics, map: loadMap, winback: loadWinback, inbox: loadInbox, versions: loadVersions, news: loadNews, aiConfig: loadAiConfig, aiMetrics: loadAiMetrics, aiEvents: loadAiEvents, aiHealth: loadAiHealth, aiProvider: loadAiProvider, aiModels: loadAiModels, aiAvailable: loadAiAvailability, aiPlans: loadAiPlans, traces: loadTraces, vitals: loadVitals, health: loadHealth, whatsapp: loadWhatsapp, verification: loadVerification, recipients: loadRecipients };
     loaders[resource]?.();
   }
 
@@ -5343,6 +5741,17 @@
       const id = target.dataset.refToggle;
       if (state.referralOpen.has(id)) state.referralOpen.delete(id); else state.referralOpen.add(id);
       const results = $("referral-results"); if (results) results.innerHTML = renderReferralResults();
+      return;
+    }
+    if (target.hasAttribute("data-promo-new")) return openPromoEditor();
+    if (target.dataset.promoEdit) return openPromoEditor(target.dataset.promoEdit);
+    if (target.dataset.promoToggle) return togglePromo(target.dataset.promoToggle);
+    if (target.dataset.promoDelete) return deletePromo(target.dataset.promoDelete);
+    if (target.dataset.promoTab) { state.promoTab = target.dataset.promoTab; return renderCurrentPage(); }
+    if (target.dataset.promoOpen) {
+      const id = target.dataset.promoOpen;
+      if (state.promoOpen.has(id)) state.promoOpen.delete(id); else state.promoOpen.add(id);
+      const results = $("promo-results"); if (results) results.innerHTML = renderPromoResults();
       return;
     }
     if (target.dataset.nav) {
@@ -5406,6 +5815,10 @@
     if (event.target.id === "referral-search") {
       state.referralFilter = event.target.value;
       const results = $("referral-results"); if (results) results.innerHTML = renderReferralResults();
+    }
+    if (event.target.id === "promo-search") {
+      state.promoFilter = event.target.value;
+      const results = $("promo-results"); if (results) results.innerHTML = renderPromoResults();
     }
     if (event.target.id === "inbox-search") {
       state.inboxSearch = event.target.value;
@@ -5520,6 +5933,7 @@
     if (!target) return;
     if (target.hasAttribute("data-close-detail")) return els.detail.close();
     if (target.hasAttribute("data-news-save")) return saveNews();
+    if (target.hasAttribute("data-promo-save")) return savePromo();
     if (target.dataset.newsUpload) return $(`news-file-${target.dataset.newsUpload}`)?.click();
     if (target.hasAttribute("data-news-video-upload")) return $("news-file-video")?.click();
     if (target.hasAttribute("data-news-video-clear") && state.detail?.type === "news") {
@@ -5570,6 +5984,7 @@
       if (account) detailStore(account).noteDraft = event.target.value;
       return;
     }
+    if (event.target.dataset.promoField) return onPromoInput(event.target);
     onNewsInput(event.target);
   });
 
@@ -5592,6 +6007,7 @@
       return renderNewsEditor();
     }
     if (event.target.dataset.newsField) return onNewsInput(event.target);
+    if (event.target.dataset.promoField) return onPromoInput(event.target);
     if (event.target.id === "trace-detail-hours" && state.detail?.type === "trace") openTrace(state.detail.userId, asNumber(event.target.value, 24));
     if (event.target.id === "user-trace-hours") {
       const account = findAccount(state.detail?.key); const store = detailStore(account);
