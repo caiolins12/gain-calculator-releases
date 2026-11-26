@@ -17,7 +17,7 @@
             <p class="eyebrow">Gain Calculator</p>
             <h1>Política de Privacidade</h1>
             <p class="subtitle">Como tratamos seus dados no Gain Calculator</p>
-            <p class="meta">Versão 21 &middot; Vigente desde 21 de novembro de 2026</p>
+            <p class="meta">Versão 22 &middot; Vigente desde 25 de novembro de 2026</p>
         </header>
 
         <section class="legal-section">
@@ -122,7 +122,7 @@ O que é registrado:
 • Tipo de veículo declarado e versão do app instalada.
 
 O que NÃO é registrado, por decisão de projeto:
-• Nenhum carimbo de hora por ação e nenhuma ordem de navegação. Fora a primeira vez de cada passo do primeiro acesso, os números são somas do dia: não é possível reconstruir o que você fez em cada momento, nem a sequência de telas que visitou.
+• Nenhum carimbo de hora por ação e nenhuma ordem de navegação. Fora a primeira vez de cada passo do primeiro acesso, os números são somas do dia: não é possível reconstruir o que você fez em cada momento, nem a sequência de telas que visitou. O diagnóstico técnico do monitoramento, que leva data e hora, é outro tratamento, descrito na seção 7.
 • Nenhum conteúdo de corrida, endereço, nome de passageiro, valor ou texto lido da tela integra as estatísticas de uso.
 • Nenhuma ferramenta de analytics de terceiros. Não usamos Firebase Analytics, Google Analytics, ferramentas de attribution ou SDKs de publicidade. Esses números não saem da nossa infraestrutura e não são vendidos, cedidos ou compartilhados com ninguém.
 
@@ -132,12 +132,24 @@ Base legal: legítimo interesse (art. 7º, IX da LGPD) em aprimorar o serviço p
         </section>
 
         <section class="legal-section">
-            <h2>7. Relatórios de diagnóstico</h2>
-            <p>Quando o monitoramento apresenta falha, o app pode gerar um relatório técnico para que possamos investigar. O envio depende de uma ação sua: existir um erro pendente E você tocar em "enviar relatório".
+            <h2>7. Diagnóstico do monitoramento</h2>
+            <p>O monitoramento depende de coisas que o Android e o fabricante do aparelho controlam: o sistema pode encerrar o app para economizar bateria, desligar o serviço de acessibilidade ou impedir que a janela de dados apareça por cima de outro aplicativo. Quando isso acontece, quem está dirigindo vê apenas que "o app não mostrou nada". Para descobrir a causa sem pedir nada a você, o app registra e envia sozinho um diagnóstico técnico.
 
-Esse relatório inclui: modelo, marca e fabricante do aparelho, versão do Android, versão do app, o código e a mensagem do erro, quantas vezes ele ocorreu, e um trecho recente do registro técnico (log) do próprio app. Para permitir o retorno, o relatório vem acompanhado do seu nome e e-mail de cadastro.
+O que o diagnóstico automático registra:
+• Quando e por que o processo do app foi encerrado, com o motivo que o próprio Android guarda (por exemplo, falta de memória, travamento ou "forçar parada").
+• O estado do monitoramento e do aparelho: serviço de acessibilidade ligado e conectado, leitura ativa, ícone flutuante aberto, permissões do app (sobreposição, notificações, localização), isenção da otimização de bateria, restrições de segundo plano e economia de energia, tela ligada, quais plataformas estão marcadas e se a licença está válida.
+• Se a janela de dados chegou de fato à tela, ficou coberta por outra janela ou foi escondida pelo sistema. Quando outro aplicativo está envolvido, só é registrado o nome do pacote dele se for um aplicativo de transporte, de navegação ou do próprio sistema; qualquer outro aparece apenas como "outro".
+• Mensagens técnicas do próprio Gain Calculator sobre o monitoramento (por exemplo, "o Android recusou religar a leitura"), escolhidas de uma lista fechada.
 
-O log enviado contém apenas mensagens produzidas pelo Gain Calculator sobre o funcionamento do monitoramento. Ele é usado exclusivamente para diagnóstico técnico e descartado quando o caso é encerrado.</p>
+Cada registro leva a data e a hora, o modelo do aparelho, a versão do Android e a do app, e é associado à sua conta e ao identificador do aparelho, para que um problema relatado possa ser investigado.
+
+O que o diagnóstico automático NÃO contém: nenhum conteúdo de corrida, endereço, nome de passageiro, valor, localização, imagem ou texto lido da tela, e nenhuma informação sobre o uso de outros aplicativos além do descrito acima.
+
+Como sobe: em segundo plano, em pequenos lotes, com teto diário por aparelho. Fica guardado por 30 dias e depois é apagado automaticamente.
+
+Base legal: legítimo interesse (art. 7º, IX da LGPD) em manter funcionando o serviço que você contratou, limitado a dados técnicos. Você pode se opor a qualquer momento escrevendo para <a href="mailto:gaincalculatorsup@gmail.com">gaincalculatorsup@gmail.com</a>, sem prejuízo ao seu acesso aos recursos do app.
+
+Relatório enviado por você: além do diagnóstico automático, o app pode gerar um relatório técnico que só é enviado se você tocar em "enviar relatório". Ele inclui modelo, marca e fabricante do aparelho, versão do Android, versão do app, o código e a mensagem do erro, quantas vezes ele ocorreu, e um trecho recente do registro técnico (log) do próprio app; para permitir o retorno, vem acompanhado do seu nome e e-mail de cadastro. Esse relatório é usado exclusivamente para diagnóstico técnico e descartado quando o caso é encerrado.</p>
         </section>
 
         <section class="legal-section">
@@ -211,7 +223,7 @@ As notificações de funcionamento não podem ser desligadas sem desligar o recu
             <h2>13. Bases legais do tratamento</h2>
             <p>• Execução de contrato (art. 7º, V): cadastro, autenticação, licenciamento, sincronização dos seus dados e prestação dos recursos do app.
 • Consentimento (art. 7º, I): leitura da tela durante o monitoramento, gravação por câmera e microfone, gravação da tela, captura automática de prints, leitura de um print escolhido por você, envio de relatórios de diagnóstico e rastro do programa de testadores. Todos dependem de permissão que você concede e pode revogar a qualquer momento nos Ajustes do Android ou do próprio app.
-• Legítimo interesse (art. 7º, IX): estatísticas de uso para melhoria do serviço, medidas de prevenção a fraude e a uso indevido de licenças, e comunicados de serviço sobre o funcionamento do app.
+• Legítimo interesse (art. 7º, IX): estatísticas de uso para melhoria do serviço, diagnóstico automático do monitoramento (seção 7), medidas de prevenção a fraude e a uso indevido de licenças, e comunicados de serviço sobre o funcionamento do app.
 • Cumprimento de obrigação legal ou regulatória (art. 7º, II): guarda de registros exigidos por lei.
 
 Para os dados de passageiros e terceiros (seção 3), atuamos como operador e o tratamento se dá por instrução sua, no seu interesse legítimo de manter o controle da própria atividade profissional.</p>
@@ -290,7 +302,8 @@ Nenhum sistema é 100% imune a incidentes. Em caso de incidente de segurança qu
 
 • Dados de cadastro, corridas, lançamentos e configurações: enquanto a conta existir.
 • Rastro do programa de testadores: 30 dias a partir do envio, com apagamento automático.
-• Relatórios de diagnóstico: até o encerramento do caso a que se referem.
+• Diagnóstico automático do monitoramento: 30 dias a partir do registro, com apagamento automático.
+• Relatórios de diagnóstico enviados por você: até o encerramento do caso a que se referem.
 • Códigos de verificação (OTP): minutos, apenas o tempo de validade do código.
 • Registros de pagamento: pelo prazo exigido pela legislação fiscal e de defesa do consumidor, mesmo após a exclusão da conta, restritos ao mínimo necessário.
 • Indicações: enquanto a conta existir. Excluída a conta, o registro deixa de apontar para ela, e fica apenas o resumo criptográfico do número de telefone de quem usou um código, enquanto o programa Indique e ganhe existir, só para impedir que o mesmo número receba os dias de indicação de novo (prevenção a fraude, seção 13).
